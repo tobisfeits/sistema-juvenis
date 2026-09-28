@@ -1,0 +1,1102 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { createClient } from "@/lib/supabase";
+
+/* ------------------------------------------------------------------ */
+/*  Tipos e constantes                                                */
+/* ------------------------------------------------------------------ */
+
+type Juvenil = {
+  id: number;
+  nome: string;
+  aniversario_dia: number | null;
+  aniversario_mes: number | null;
+};
+
+const SISTEMA_PONTOS = {
+  presenca: 20,
+  pontualidade: 10,
+  participacao: 10,
+  estudo_licao: 25,
+  verso_aureo: 20,
+  biblia: 15,
+} as const;
+
+type Criterio = keyof typeof SISTEMA_PONTOS;
+
+const CRITERIOS = Object.keys(SISTEMA_PONTOS) as Criterio[];
+
+const PONTUACAO_MAXIMA = CRITERIOS.reduce(
+  (soma, c) => soma + SISTEMA_PONTOS[c],
+  0
+);
+
+const LABEL: Record<Criterio, string> = {
+  presenca: "Presença",
+  pontualidade: "Pontualidade",
+  participacao: "Participação",
+  estudo_licao: "Estudo da Lição",
+  verso_aureo: "Verso Áureo",
+  biblia: "Bíblia",
+};
+
+type AvaliacaoRow = {
+  id?: number;
+  juvenil_id: number;
+  data_avaliacao: string;
+  presenca: boolean;
+  pontualidade: boolean;
+  participacao: boolean;
+  estudo_licao: boolean;
+  verso_aureo: boolean;
+  biblia: boolean;
+};
+
+function semId<T extends { id?: number }>(obj: T): Omit<T, "id"> {
+  const { id: _ignorar, ...resto } = obj;
+  return resto;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                           */
+/* ------------------------------------------------------------------ */
+
+function hojeISO(): string {
+  const d = new Date();
+  const ano = d.getFullYear();
+  const mes = String(d.getMonth() + 1).padStart(2, "0");
+  const dia = String(d.getDate()).padStart(2, "0");
+  return `${ano}-${mes}-${dia}`;
+}
+
+function formatarDataBR(iso: string): string {
+  const [ano, mes, dia] = iso.split("-");
+  return `${dia}/${mes}/${ano}`;
+}
+
+function aniversarioNaSemana(dia: number | null, mes: number | null): boolean {
+  if (!dia || !mes) return false;
+  const hoje = new Date();
+  const anoAtual = hoje.getFullYear();
+  const aniversario = new Date(anoAtual, mes - 1, dia);
+  if (aniversario < hoje && aniversario.toDateString() !== hoje.toDateString()) {
+    aniversario.setFullYear(anoAtual + 1);
+  }
+  const diffDias = Math.ceil(
+    (aniversario.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)
+  );
+  return diffDias >= 0 && diffDias <= 7;
+}
+
+function ehAniversarioHoje(dia: number | null, mes: number | null): boolean {
+  if (!dia || !mes) return false;
+  const hoje = new Date();
+  return hoje.getDate() === dia && hoje.getMonth() + 1 === mes;
+}
+
+function ehAniversarioNoMes(dia: number | null, mes: number | null): boolean {
+  if (!dia || !mes) return false;
+  const hoje = new Date();
+  return hoje.getMonth() + 1 === mes;
+}
+
+const TRIMESTRES = [
+  { nome: "1º Trimestre", meses: [1, 2, 3] },
+  { nome: "2º Trimestre", meses: [4, 5, 6] },
+  { nome: "3º Trimestre", meses: [7, 8, 9] },
+  { nome: "4º Trimestre", meses: [10, 11, 12] },
+];
+
+function trimestreAtual(): number {
+  const mes = new Date().getMonth() + 1;
+  if (mes <= 3) return 0;
+  if (mes <= 6) return 1;
+  if (mes <= 9) return 2;
+  return 3;
+}
+
+function calcularTotalLinha(row: AvaliacaoRow): number {
+  return CRITERIOS.reduce((soma, c) => {
+    return soma + (row[c] ? SISTEMA_PONTOS[c] : 0);
+  }, 0);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Medals                                                            */
+/* ------------------------------------------------------------------ */
+
+type Medalha = {
+  emoji: string;
+  nome: string;
+  descricao: string;
+};
+
+function calcularMedalhas(avaliacoes: AvaliacaoRow[]): Medalha[] {
+  const medalhas: Medalha[] = [];
+  if (avaliacoes.length === 0) return medalhas;
+
+  const total = avaliacoes.length;
+  const presencas = avaliacoes.filter((a) => a.presenca).length;
+
+  if (presencas >= 1) {
+    medalhas.push({
+      emoji: "⭐",
+      nome: "Primeira Presença",
+      descricao: "Compareceu pela primeira vez",
+    });
+  }
+
+  if (presencas >= 4 && presencas === total) {
+    medalhas.push({
+      emoji: "🔥",
+      nome: "Assíduo",
+      descricao: `${presencas} sábados sem faltar`,
+    });
+  }
+
+  const perfeitos = avaliacoes.filter(
+    (a) => calcularTotalLinha(a) === PONTUACAO_MAXIMA
+  ).length;
+  if (perfeitos >= 1) {
+    medalhas.push({
+      emoji: "🏆",
+      nome: "Sábado Perfeito",
+      descricao: `${perfeitos}x com 100 pontos`,
+    });
+  }
+
+  const comPresenca = avaliacoes.filter((a) => a.presenca);
+  if (comPresenca.length >= 3) {
+    const taxaEstudo =
+      comPresenca.filter((a) => a.estudo_licao).length / comPresenca.length;
+    if (taxaEstudo >= 0.8) {
+      medalhas.push({
+        emoji: "📖",
+        nome: "Mestre da Lição",
+        descricao: "80%+ em Estudo da Lição",
+      });
+    }
+
+    const taxaBiblia =
+      comPresenca.filter((a) => a.biblia).length / comPresenca.length;
+    if (taxaBiblia >= 0.8) {
+      medalhas.push({
+        emoji: "📚",
+        nome: "Conhecedor da Bíblia",
+        descricao: "80%+ trazendo Bíblia",
+      });
+    }
+
+    const taxaPontual =
+      comPresenca.filter((a) => a.pontualidade).length / comPresenca.length;
+    if (taxaPontual >= 0.9) {
+      medalhas.push({
+        emoji: "⏰",
+        nome: "Sem Atrasos",
+        descricao: "90%+ de pontualidade",
+      });
+    }
+  }
+
+  return medalhas;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Componente                                                        */
+/* ------------------------------------------------------------------ */
+
+export default function Home() {
+  const supabase = createClient();
+
+  const [juvenis, setJuvenis] = useState<Juvenil[]>([]);
+  const [avaliacoes, setAvaliacoes] = useState<Record<number, AvaliacaoRow>>({});
+  const [todasAvaliacoes, setTodasAvaliacoes] = useState<AvaliacaoRow[]>([]);
+  const [carregando, setCarregando] = useState(true);
+  const [dark, setDark] = useState(false);
+  const [dataSelecionada, setDataSelecionada] = useState<string>(hojeISO());
+  const [juvenilAberto, setJuvenilAberto] = useState<Juvenil | null>(null);
+
+  /* ----------------------- Carregar do Supabase ------------------- */
+
+  useEffect(() => {
+    async function carregarJuvenis() {
+      const { data } = await supabase
+        .from("juvenis")
+        .select("id, nome, aniversario_dia, aniversario_mes")
+        .order("id");
+      setJuvenis(data ?? []);
+    }
+    carregarJuvenis();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    async function carregarTodas() {
+      const { data } = await supabase.from("avaliacoes").select("*");
+      setTodasAvaliacoes(data ?? []);
+    }
+    carregarTodas();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    async function carregarAvaliacoes() {
+      setCarregando(true);
+
+      const { data, error } = await supabase
+        .from("avaliacoes")
+        .select("*")
+        .eq("data_avaliacao", dataSelecionada);
+
+      if (error) {
+        console.error(
+          "Erro ao buscar avaliações:",
+          "message:", error.message,
+          "details:", error.details,
+          "hint:", error.hint,
+          "code:", error.code,
+          error
+        );
+        setCarregando(false);
+        return;
+      }
+
+      const mapa: Record<number, AvaliacaoRow> = {};
+      (data ?? []).forEach((row: AvaliacaoRow) => {
+        mapa[row.juvenil_id] = row;
+      });
+      setAvaliacoes(mapa);
+      setCarregando(false);
+    }
+
+    carregarAvaliacoes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataSelecionada]);
+
+  /* ----------------------- Alternar critério ---------------------- */
+
+  const alternarCriterio = async (juvenilId: number, criterio: Criterio) => {
+    const rowAtual = avaliacoes[juvenilId];
+
+    const base: AvaliacaoRow =
+      rowAtual ?? {
+        juvenil_id: juvenilId,
+        data_avaliacao: dataSelecionada,
+        presenca: false,
+        pontualidade: false,
+        participacao: false,
+        estudo_licao: false,
+        verso_aureo: false,
+        biblia: false,
+      };
+
+    const isPresenca = criterio === "presenca";
+    const temPresenca = base.presenca;
+    const statusAtual = base[criterio];
+
+    if (!isPresenca && !temPresenca) return;
+
+    let novaRow: AvaliacaoRow;
+
+    if (isPresenca && statusAtual) {
+      novaRow = {
+        ...base,
+        presenca: false,
+        pontualidade: false,
+        participacao: false,
+        estudo_licao: false,
+        verso_aureo: false,
+        biblia: false,
+      };
+    } else {
+      novaRow = {
+        ...base,
+        [criterio]: !statusAtual,
+      };
+    }
+
+    setAvaliacoes((prev) => ({ ...prev, [juvenilId]: novaRow }));
+
+    const { error } = await supabase
+      .from("avaliacoes")
+      .upsert(semId(novaRow), { onConflict: "data_avaliacao,juvenil_id" });
+
+    if (error) {
+      console.error("Erro ao salvar avaliação:", error.message, error);
+      setAvaliacoes((prev) => ({ ...prev, [juvenilId]: base }));
+    } else {
+      setTodasAvaliacoes((prev) => {
+        const outras = prev.filter(
+          (a) =>
+            !(
+              a.juvenil_id === juvenilId &&
+              a.data_avaliacao === dataSelecionada
+            )
+        );
+        return [...outras, novaRow];
+      });
+    }
+  };
+
+  /* ----------------------- Alternar todos presentes --------------- */
+
+  // Verifica se TODOS os juvenis já estão marcados como presentes
+  const todosPresentes = useMemo(() => {
+    if (juvenis.length === 0) return false;
+    return juvenis.every((j) => avaliacoes[j.id]?.presenca === true);
+  }, [juvenis, avaliacoes]);
+
+  const alternarTodosPresentes = async () => {
+    const acao = todosPresentes
+      ? "DESMARCAR a presença de TODOS"
+      : "marcar presença de TODOS";
+    const confirmar = confirm(
+      `Deseja ${acao} os juvenis neste sábado?`
+    );
+    if (!confirmar) return;
+
+    // Monta os registros SEM o campo id
+    const novasAvaliacoes = juvenis.map((j) => {
+      const rowAtual = avaliacoes[j.id];
+      const base: AvaliacaoRow =
+        rowAtual ?? {
+          juvenil_id: j.id,
+          data_avaliacao: dataSelecionada,
+          presenca: false,
+          pontualidade: false,
+          participacao: false,
+          estudo_licao: false,
+          verso_aureo: false,
+          biblia: false,
+        };
+
+      if (todosPresentes) {
+        // DESMARCAR: zera tudo (segue a mesma regra da presença individual)
+        return {
+          juvenil_id: j.id,
+          data_avaliacao: dataSelecionada,
+          presenca: false,
+          pontualidade: false,
+          participacao: false,
+          estudo_licao: false,
+          verso_aureo: false,
+          biblia: false,
+        };
+      } else {
+        // MARCAR: liga a presença, mantém os outros critérios
+        return {
+          ...semId(base),
+          juvenil_id: j.id,
+          data_avaliacao: dataSelecionada,
+          presenca: true,
+        };
+      }
+    });
+
+    // Atualiza o estado local (mantendo o id, se já existir)
+    const novoMapa: Record<number, AvaliacaoRow> = { ...avaliacoes };
+    juvenis.forEach((j) => {
+      const anterior = avaliacoes[j.id];
+      if (todosPresentes) {
+        // Desmarcar tudo
+        novoMapa[j.id] = {
+          ...(anterior ?? {
+            juvenil_id: j.id,
+            data_avaliacao: dataSelecionada,
+          }),
+          juvenil_id: j.id,
+          data_avaliacao: dataSelecionada,
+          presenca: false,
+          pontualidade: false,
+          participacao: false,
+          estudo_licao: false,
+          verso_aureo: false,
+          biblia: false,
+        };
+      } else {
+        // Marcar presença (mantém critérios)
+        novoMapa[j.id] = {
+          ...(anterior ?? {
+            juvenil_id: j.id,
+            data_avaliacao: dataSelecionada,
+            pontualidade: false,
+            participacao: false,
+            estudo_licao: false,
+            verso_aureo: false,
+            biblia: false,
+          }),
+          juvenil_id: j.id,
+          data_avaliacao: dataSelecionada,
+          presenca: true,
+        };
+      }
+    });
+    setAvaliacoes(novoMapa);
+
+    // Envia para o Supabase
+    const { error } = await supabase
+      .from("avaliacoes")
+      .upsert(novasAvaliacoes, { onConflict: "data_avaliacao,juvenil_id" });
+
+    if (error) {
+      console.error("Erro ao alternar todos presentes:", error.message, error);
+      alert(`Erro ao salvar: ${error.message}`);
+    } else {
+      const { data } = await supabase
+        .from("avaliacoes")
+        .select("*")
+        .eq("data_avaliacao", dataSelecionada);
+
+      const mapa: Record<number, AvaliacaoRow> = {};
+      (data ?? []).forEach((row: AvaliacaoRow) => {
+        mapa[row.juvenil_id] = row;
+      });
+      setAvaliacoes(mapa);
+
+      setTodasAvaliacoes((prev) => {
+        const filtradas = prev.filter(
+          (a) => a.data_avaliacao !== dataSelecionada
+        );
+        return [...filtradas, ...(data ?? [])];
+      });
+    }
+  };
+
+  /* ----------------------- Cálculo de total ---------------------- */
+
+  const calcularTotal = (juvenilId: number): number => {
+    const row = avaliacoes[juvenilId];
+    if (!row) return 0;
+    return calcularTotalLinha(row);
+  };
+
+  /* ----------------------- Derivados ----------------------------- */
+
+  const ranking = useMemo(() => {
+    return juvenis
+      .map((j) => ({ ...j, total: calcularTotal(j.id) }))
+      .filter((j) => j.total > 0)
+      .sort((a, b) => b.total - a.total);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [avaliacoes, juvenis]);
+
+  const presentes = useMemo(
+    () => juvenis.filter((j) => avaliacoes[j.id]?.presenca).length,
+    [avaliacoes, juvenis]
+  );
+
+  const aniversariantesSemana = useMemo(() => {
+    return juvenis.filter((j) =>
+      aniversarioNaSemana(j.aniversario_dia, j.aniversario_mes)
+    );
+  }, [juvenis]);
+
+  const aniversariantesHoje = useMemo(() => {
+    return juvenis.filter((j) =>
+      ehAniversarioHoje(j.aniversario_dia, j.aniversario_mes)
+    );
+  }, [juvenis]);
+
+  const aniversariantesMes = useMemo(() => {
+    return juvenis.filter((j) =>
+      ehAniversarioNoMes(j.aniversario_dia, j.aniversario_mes)
+    );
+  }, [juvenis]);
+
+  const liderTrimestre = useMemo(() => {
+    const tri = trimestreAtual();
+    const meses = TRIMESTRES[tri].meses;
+    const ano = new Date().getFullYear();
+
+    const somas: Record<number, number> = {};
+    juvenis.forEach((j) => (somas[j.id] = 0));
+
+    todasAvaliacoes.forEach((a) => {
+      const [anoStr, mesStr] = a.data_avaliacao.split("-");
+      if (Number(anoStr) !== ano) return;
+      if (!meses.includes(Number(mesStr))) return;
+
+      CRITERIOS.forEach((c) => {
+        if (a[c]) somas[a.juvenil_id] += SISTEMA_PONTOS[c];
+      });
+    });
+
+    let lider: { nome: string; total: number } | null = null;
+    juvenis.forEach((j) => {
+      const t = somas[j.id] ?? 0;
+      if (!lider || t > lider.total) lider = { nome: j.nome, total: t };
+    });
+
+    return lider && lider.total > 0 ? lider : null;
+  }, [juvenis, todasAvaliacoes]);
+
+  const historicoJuvenil = useMemo(() => {
+    if (!juvenilAberto) return [];
+    return todasAvaliacoes
+      .filter((a) => a.juvenil_id === juvenilAberto.id)
+      .sort((a, b) => a.data_avaliacao.localeCompare(b.data_avaliacao));
+  }, [todasAvaliacoes, juvenilAberto]);
+
+  const statsJuvenil = useMemo(() => {
+    if (!juvenilAberto || historicoJuvenil.length === 0) {
+      return null;
+    }
+    const total = historicoJuvenil.reduce(
+      (s, a) => s + calcularTotalLinha(a),
+      0
+    );
+    const presencas = historicoJuvenil.filter((a) => a.presenca).length;
+    const faltas = historicoJuvenil.length - presencas;
+    const percentual = Math.round((presencas / historicoJuvenil.length) * 100);
+    const media = Math.round(total / historicoJuvenil.length);
+    const recorde = Math.max(...historicoJuvenil.map(calcularTotalLinha));
+
+    return { total, presencas, faltas, percentual, media, recorde };
+  }, [juvenilAberto, historicoJuvenil]);
+
+  const medalhasJuvenil = useMemo(() => {
+    if (!juvenilAberto) return [];
+    return calcularMedalhas(historicoJuvenil);
+  }, [juvenilAberto, historicoJuvenil]);
+
+  /* ----------------------- Dark mode ----------------------------- */
+
+  useEffect(() => {
+    const estaEscuro = document.documentElement.classList.contains("dark");
+    setDark(estaEscuro);
+  }, []);
+
+  const alternarTema = () => {
+    const root = document.documentElement;
+    const novo = !dark;
+
+    if (novo) {
+      root.classList.add("dark");
+      localStorage.setItem("tema-juvenis", "dark");
+    } else {
+      root.classList.remove("dark");
+      localStorage.setItem("tema-juvenis", "light");
+    }
+
+    setDark(novo);
+  };
+
+  /* ----------------------- UI ------------------------------------ */
+
+  if (carregando && juvenis.length === 0) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
+        <p className="text-slate-600 dark:text-slate-300">Carregando...</p>
+      </main>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-50 p-4 transition-colors dark:bg-slate-950 dark:text-slate-100 sm:p-8">
+      <div className="mx-auto max-w-6xl">
+        <header className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100 sm:text-3xl">
+              Avaliação de Juvenis
+            </h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Pontuação máxima:{" "}
+              <span className="font-semibold text-slate-700 dark:text-slate-200">
+                {PONTUACAO_MAXIMA} pontos
+              </span>
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800">
+              <span className="text-slate-500 dark:text-slate-400">📅</span>
+              <input
+                type="date"
+                value={dataSelecionada}
+                onChange={(e) => setDataSelecionada(e.target.value)}
+                className="bg-transparent text-slate-700 outline-none dark:text-slate-200"
+              />
+            </label>
+
+            <Link
+              href="/ranking"
+              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-emerald-700"
+            >
+              🏆 Ver Ranking
+            </Link>
+            <Link
+              href="/premiacoes"
+              className="rounded-lg bg-amber-500 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-amber-600"
+            >
+              🏅 Premiações
+            </Link>
+
+            <button
+              onClick={alternarTema}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            >
+              {dark ? "☀️ Claro" : "🌙 Escuro"}
+            </button>
+          </div>
+        </header>
+
+        {/* DASHBOARD */}
+        <section className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              👥 Juvenis
+            </p>
+            <p className="mt-1 text-2xl font-bold text-slate-800 dark:text-slate-100">
+              {juvenis.length}
+            </p>
+          </div>
+
+          <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              ✅ Presentes
+            </p>
+            <p className="mt-1 text-2xl font-bold text-emerald-700 dark:text-emerald-300">
+              {presentes}/{juvenis.length}
+            </p>
+          </div>
+
+          <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              🎂 Aniversários do mês
+            </p>
+            <p className="mt-1 text-2xl font-bold text-amber-600 dark:text-amber-300">
+              {aniversariantesMes.length}
+            </p>
+          </div>
+
+          <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              🏆 Líder do trimestre
+            </p>
+            <p className="mt-1 truncate text-sm font-bold text-slate-800 dark:text-slate-100">
+              {liderTrimestre
+                ? `${liderTrimestre.nome.split(" ")[0]} (${liderTrimestre.total} pts)`
+                : "—"}
+            </p>
+          </div>
+        </section>
+
+        {/* Painel de Aniversariantes */}
+        {aniversariantesHoje.length > 0 ? (
+          <div className="mb-4 rounded-xl bg-yellow-100 px-4 py-3 text-sm font-semibold text-yellow-900 ring-2 ring-yellow-400 dark:bg-yellow-900/50 dark:text-yellow-200 dark:ring-yellow-500">
+            🎉 Hoje é aniversário de{" "}
+            {aniversariantesHoje.map((j) => j.nome.split(" ")[0]).join(", ")}!
+            Parabéns! 🎂
+          </div>
+        ) : (
+          aniversariantesSemana.length > 0 && (
+            <div className="mb-4 rounded-xl bg-amber-50 px-4 py-2 text-sm text-amber-800 ring-1 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-900">
+              🎂 Aniversariantes da semana:{" "}
+              {aniversariantesSemana
+                .map(
+                  (j) =>
+                    `${String(j.aniversario_dia).padStart(2, "0")}/${String(
+                      j.aniversario_mes
+                    ).padStart(2, "0")} - ${j.nome.split(" ")[0]}`
+                )
+                .join(" • ")}
+            </div>
+          )
+        )}
+
+        {/* Aviso da data + botão marcar/desmarcar todos */}
+        <div className="mb-4 flex flex-col gap-2 rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-800 ring-1 ring-blue-200 dark:bg-blue-950/40 dark:text-blue-200 dark:ring-blue-900 sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            Avaliando o sábado de{" "}
+            <span className="font-semibold">
+              {formatarDataBR(dataSelecionada)}
+            </span>
+            .
+          </span>
+          <button
+            onClick={alternarTodosPresentes}
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition ${
+              todosPresentes
+                ? "bg-red-600 hover:bg-red-700"
+                : "bg-blue-600 hover:bg-blue-700"
+            }`}
+          >
+            {todosPresentes
+              ? "❌ Desmarcar todos presentes"
+              : "✅ Marcar todos presentes"}
+          </button>
+        </div>
+
+        <section className="mb-4 flex flex-wrap gap-2">
+          {CRITERIOS.map((c) => (
+            <span
+              key={c}
+              className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-600 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700"
+            >
+              {LABEL[c]}: {SISTEMA_PONTOS[c]} pts
+            </span>
+          ))}
+        </section>
+
+        <section className="overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">
+          <table className="w-full min-w-[640px] border-collapse text-sm">
+            <thead>
+              <tr className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                <th className="px-4 py-3 text-left font-semibold">#</th>
+                <th className="px-4 py-3 text-left font-semibold">Juvenil</th>
+                {CRITERIOS.map((c) => (
+                  <th key={c} className="px-2 py-3 text-center font-semibold">
+                    {LABEL[c]}
+                  </th>
+                ))}
+                <th className="px-4 py-3 text-center font-semibold">Total</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {juvenis.map((j, index) => {
+                const row = avaliacoes[j.id];
+                const temPresenca = row?.presenca ?? false;
+                const total = calcularTotal(j.id);
+
+                return (
+                  <tr
+                    key={j.id}
+                    className={
+                      index % 2 === 0
+                        ? "bg-white dark:bg-slate-900"
+                        : "bg-slate-50/60 dark:bg-slate-800/40"
+                    }
+                  >
+                    <td className="px-4 py-2 text-slate-500 dark:text-slate-400">
+                      {j.id}
+                    </td>
+                    <td className="px-4 py-2 font-medium text-slate-800 dark:text-slate-100">
+                      <button
+                        onClick={() => setJuvenilAberto(j)}
+                        className="text-left underline-offset-4 transition hover:text-emerald-700 hover:underline dark:hover:text-emerald-300"
+                        title="Ver histórico do juvenil"
+                      >
+                        {j.nome}
+                      </button>
+                    </td>
+
+                    {CRITERIOS.map((c) => {
+                      const isPresenca = c === "presenca";
+                      const marcado = row?.[c] ?? false;
+                      const desabilitado = !isPresenca && !temPresenca;
+
+                      return (
+                        <td key={c} className="px-2 py-2 text-center">
+                          <label
+                            className={`inline-flex cursor-pointer items-center justify-center ${
+                              desabilitado
+                                ? "cursor-not-allowed opacity-40"
+                                : ""
+                            }`}
+                            title={
+                              desabilitado
+                                ? "Marque a presença primeiro"
+                                : LABEL[c]
+                            }
+                          >
+                            <input
+                              type="checkbox"
+                              checked={marcado}
+                              disabled={desabilitado}
+                              onChange={() => alternarCriterio(j.id, c)}
+                              className="h-5 w-5 cursor-pointer rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 disabled:cursor-not-allowed dark:border-slate-600 dark:bg-slate-700 dark:checked:bg-emerald-500"
+                              aria-label={`${LABEL[c]} — ${j.nome}`}
+                            />
+                          </label>
+                        </td>
+                      );
+                    })}
+
+                    <td className="px-4 py-2 text-center">
+                      <span
+                        className={`inline-block min-w-[3rem] rounded-full px-2 py-1 text-sm font-bold ${
+                          total === PONTUACAO_MAXIMA
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300"
+                            : total >= 60
+                              ? "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300"
+                              : total > 0
+                                ? "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200"
+                                : "bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500"
+                        }`}
+                      >
+                        {total}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </section>
+
+        {ranking.length > 0 && (
+          <section className="mt-8">
+            <h2 className="mb-3 text-lg font-semibold text-slate-800 dark:text-slate-100">
+              🏆 Ranking do sábado ({formatarDataBR(dataSelecionada)})
+            </h2>
+            <ol className="space-y-2">
+              {ranking.map((j, i) => (
+                <li
+                  key={j.id}
+                  className="flex items-center justify-between rounded-xl bg-white px-4 py-2 text-sm shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800"
+                >
+                  <span className="flex items-center gap-3">
+                    <span
+                      className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
+                        i === 0
+                          ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/50 dark:text-yellow-300"
+                          : i === 1
+                            ? "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200"
+                            : i === 2
+                              ? "bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300"
+                              : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+                      }`}
+                    >
+                      {i + 1}
+                    </span>
+                    <span className="font-medium text-slate-800 dark:text-slate-100">
+                      {j.nome}
+                    </span>
+                  </span>
+                  <span className="font-bold text-emerald-700 dark:text-emerald-300">
+                    {j.total} pts
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
+      </div>
+
+      {/* ============== MODAL DE HISTÓRICO DO JUVENIL ============== */}
+      {juvenilAberto && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm"
+          onClick={() => setJuvenilAberto(null)}
+        >
+          <div
+            className="my-8 w-full max-w-3xl rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-700"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 p-5 dark:border-slate-700">
+              <div>
+                <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">
+                  {juvenilAberto.nome}
+                </h2>
+                {juvenilAberto.aniversario_dia && juvenilAberto.aniversario_mes && (
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    🎂 Aniversário:{" "}
+                    {String(juvenilAberto.aniversario_dia).padStart(2, "0")}/
+                    {String(juvenilAberto.aniversario_mes).padStart(2, "0")}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => setJuvenilAberto(null)}
+                className="rounded-lg p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                aria-label="Fechar"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="max-h-[75vh] overflow-y-auto p-5">
+              {historicoJuvenil.length === 0 ? (
+                <p className="text-center text-slate-500 dark:text-slate-400">
+                  Nenhuma avaliação registrada ainda.
+                </p>
+              ) : (
+                <>
+                  {medalhasJuvenil.length > 0 && (
+                    <section className="mb-5">
+                      <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        🏅 Conquistas
+                      </h3>
+                      <div className="flex flex-wrap gap-2">
+                        {medalhasJuvenil.map((m) => (
+                          <div
+                            key={m.nome}
+                            className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-amber-50 to-yellow-50 px-3 py-2 ring-1 ring-amber-200 dark:from-amber-950/40 dark:to-yellow-950/40 dark:ring-amber-800"
+                            title={m.descricao}
+                          >
+                            <span className="text-xl">{m.emoji}</span>
+                            <div>
+                              <p className="text-xs font-semibold text-amber-900 dark:text-amber-200">
+                                {m.nome}
+                              </p>
+                              <p className="text-[10px] text-amber-700 dark:text-amber-400">
+                                {m.descricao}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {statsJuvenil && (
+                    <section className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                      <div className="rounded-xl bg-emerald-50 p-3 ring-1 ring-emerald-200 dark:bg-emerald-950/40 dark:ring-emerald-900">
+                        <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+                          Total de pontos
+                        </p>
+                        <p className="text-xl font-bold text-emerald-800 dark:text-emerald-200">
+                          {statsJuvenil.total}
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl bg-blue-50 p-3 ring-1 ring-blue-200 dark:bg-blue-950/40 dark:ring-blue-900">
+                        <p className="text-[10px] font-medium uppercase tracking-wide text-blue-700 dark:text-blue-400">
+                          Presenças
+                        </p>
+                        <p className="text-xl font-bold text-blue-800 dark:text-blue-200">
+                          {statsJuvenil.presencas}
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl bg-red-50 p-3 ring-1 ring-red-200 dark:bg-red-950/40 dark:ring-red-900">
+                        <p className="text-[10px] font-medium uppercase tracking-wide text-red-700 dark:text-red-400">
+                          Faltas
+                        </p>
+                        <p className="text-xl font-bold text-red-800 dark:text-red-200">
+                          {statsJuvenil.faltas}
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl bg-purple-50 p-3 ring-1 ring-purple-200 dark:bg-purple-950/40 dark:ring-purple-900">
+                        <p className="text-[10px] font-medium uppercase tracking-wide text-purple-700 dark:text-purple-400">
+                          % Presença
+                        </p>
+                        <p className="text-xl font-bold text-purple-800 dark:text-purple-200">
+                          {statsJuvenil.percentual}%
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200 dark:bg-slate-800/60 dark:ring-slate-700">
+                        <p className="text-[10px] font-medium uppercase tracking-wide text-slate-600 dark:text-slate-400">
+                          Média por sábado
+                        </p>
+                        <p className="text-xl font-bold text-slate-800 dark:text-slate-200">
+                          {statsJuvenil.media}
+                        </p>
+                      </div>
+
+                      <div className="rounded-xl bg-amber-50 p-3 ring-1 ring-amber-200 dark:bg-amber-950/40 dark:ring-amber-900">
+                        <p className="text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                          Recorde
+                        </p>
+                        <p className="text-xl font-bold text-amber-800 dark:text-amber-200">
+                          {statsJuvenil.recorde}
+                        </p>
+                      </div>
+                    </section>
+                  )}
+
+                  <section className="mb-5">
+                    <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      📈 Evolução por sábado
+                    </h3>
+                    <div className="flex items-end gap-1 overflow-x-auto rounded-xl bg-slate-50 p-3 ring-1 ring-slate-200 dark:bg-slate-800/60 dark:ring-slate-700">
+                      {historicoJuvenil.map((a) => {
+                        const t = calcularTotalLinha(a);
+                        const alt = Math.max((t / PONTUACAO_MAXIMA) * 100, 4);
+                        return (
+                          <div
+                            key={a.data_avaliacao}
+                            className="flex flex-col items-center gap-1"
+                            style={{ minWidth: "28px" }}
+                            title={`${formatarDataBR(a.data_avaliacao)} — ${t} pts`}
+                          >
+                            <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300">
+                              {t}
+                            </span>
+                            <div
+                              className={`w-5 rounded-t ${
+                                t === PONTUACAO_MAXIMA
+                                  ? "bg-emerald-500"
+                                  : t >= 60
+                                    ? "bg-amber-500"
+                                    : t > 0
+                                      ? "bg-slate-400"
+                                      : "bg-red-400"
+                              }`}
+                              style={{ height: `${alt}px` }}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+
+                  <section>
+                    <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      📅 Histórico completo
+                    </h3>
+                    <div className="overflow-x-auto rounded-xl ring-1 ring-slate-200 dark:ring-slate-700">
+                      <table className="w-full min-w-[500px] border-collapse text-sm">
+                        <thead>
+                          <tr className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                            <th className="px-3 py-2 text-left font-semibold">
+                              Data
+                            </th>
+                            <th className="px-3 py-2 text-center font-semibold">
+                              Pontos
+                            </th>
+                            <th className="px-3 py-2 text-center font-semibold">
+                              Presente?
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...historicoJuvenil].reverse().map((a) => {
+                            const t = calcularTotalLinha(a);
+                            return (
+                              <tr
+                                key={a.data_avaliacao}
+                                className="border-t border-slate-200 dark:border-slate-700"
+                              >
+                                <td className="px-3 py-2 text-slate-700 dark:text-slate-300">
+                                  {formatarDataBR(a.data_avaliacao)}
+                                </td>
+                                <td className="px-3 py-2 text-center">
+                                  <span
+                                    className={`inline-block min-w-[2.5rem] rounded-full px-2 py-0.5 text-xs font-bold ${
+                                      t === PONTUACAO_MAXIMA
+                                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300"
+                                        : t >= 60
+                                          ? "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300"
+                                          : t > 0
+                                            ? "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200"
+                                            : "bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500"
+                                    }`}
+                                  >
+                                    {t}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 text-center">
+                                  {a.presenca ? "✅" : "❌"}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </main>
+  );
+}
