@@ -523,11 +523,16 @@ export default function Home() {
       });
     });
 
-    let lider: { nome: string; total: number } | null = null;
-    juvenis.forEach((j) => {
-      const t = somas[j.id] ?? 0;
-      if (!lider || t > lider.total) lider = { nome: j.nome, total: t };
-    });
+        const candidatos = juvenis.map((j) => ({
+      nome: j.nome,
+      total: somas[j.id] ?? 0,
+    }));
+
+    const lider = candidatos.reduce<{ nome: string; total: number } | null>(
+      (melhor, atual) =>
+        !melhor || atual.total > melhor.total ? atual : melhor,
+      null
+    );
 
     return lider && lider.total > 0 ? lider : null;
   }, [juvenis, todasAvaliacoes]);
