@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase";
@@ -503,6 +503,54 @@ function TrocarSenhaScreen({ profile }: { profile: Profile }) {
 }
 
 /* ================================================================== */
+/*  SKELETON DE CARREGAMENTO                                          */
+/* ================================================================== */
+
+function SkeletonScreen() {
+  return (
+    <main className="min-h-screen bg-slate-50 p-4 dark:bg-slate-950 sm:p-8">
+      <div className="mx-auto max-w-6xl space-y-4">
+        {/* Cabeçalho */}
+        <div className="h-16 animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
+
+        {/* Dashboard */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div
+              key={i}
+              className="h-24 animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800"
+            />
+          ))}
+        </div>
+
+        {/* Faixa azul */}
+        <div className="h-16 animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
+
+        {/* Cartões (celular) */}
+        <div className="space-y-3 sm:hidden">
+          {[1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="h-32 animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800"
+            />
+          ))}
+        </div>
+
+        {/* Tabela (desktop) */}
+        <div className="hidden sm:block">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div
+              key={i}
+              className="mb-2 h-14 animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800"
+            />
+          ))}
+        </div>
+      </div>
+    </main>
+  );
+}
+
+/* ================================================================== */
 /*  COMPONENTE PRINCIPAL                                              */
 /* ================================================================== */
 
@@ -520,6 +568,9 @@ export default function Home() {
   const [dark, setDark] = useState(true);
   const [dataSelecionada, setDataSelecionada] = useState<string>(hojeISO());
   const [juvenilAberto, setJuvenilAberto] = useState<Juvenil | null>(null);
+
+  // Debounce: agrupa cliques rápidos em uma única requisição
+  const timeouts = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
 
   /* ----------------------- Auth ---------------------------- */
 
@@ -608,14 +659,23 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
+  // MELHORIA 2: Só carrega os últimos 6 meses (não o histórico inteiro)
   useEffect(() => {
     if (!profile || profile.must_change_password) return;
 
-    async function carregarTodas() {
-      const { data } = await supabase.from("avaliacoes").select("*");
+    async function carregarRecentes() {
+      const seisMesesAtras = new Date();
+      seisMesesAtras.setMonth(seisMesesAtras.getMonth() - 6);
+      const dataCorte = seisMesesAtras.toISOString().slice(0, 10);
+
+      const { data } = await supabase
+        .from("avaliacoes")
+        .select("*")
+        .gte("data_avaliacao", dataCorte);
+
       setTodasAvaliacoes(data ?? []);
     }
-    carregarTodas();
+    carregarRecentes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
@@ -649,8 +709,9 @@ export default function Home() {
   }, [dataSelecionada, profile]);
 
   /* ----------------------- Alternar critério ---------------------- */
+  /* MELHORIA 5: Debounce — agrupa cliques rápidos em 1 requisição    */
 
-  const alternarCriterio = async (juvenilId: number, criterio: Criterio) => {
+  const alternarCriterio = (juvenilId: number, criterio: Criterio) => {
     const rowAtual = avaliacoes[juvenilId];
 
     const base: AvaliacaoRow =
@@ -687,27 +748,36 @@ export default function Home() {
       novaRow = { ...base, [criterio]: !statusAtual };
     }
 
+    // Atualiza UI imediatamente (feedback visual na hora)
     setAvaliacoes((prev) => ({ ...prev, [juvenilId]: novaRow }));
 
-    const { error } = await supabase
-      .from("avaliacoes")
-      .upsert(semId(novaRow), { onConflict: "data_avaliacao,juvenil_id" });
-
-    if (error) {
-      console.error("Erro ao salvar avaliação:", error.message, error);
-      setAvaliacoes((prev) => ({ ...prev, [juvenilId]: base }));
-    } else {
-      setTodasAvaliacoes((prev) => {
-        const outras = prev.filter(
-          (a) =>
-            !(
-              a.juvenil_id === juvenilId &&
-              a.data_avaliacao === dataSelecionada
-            )
-        );
-        return [...outras, novaRow];
-      });
+    // Cancela o timeout anterior do MESMO juvenil e agenda um novo
+    if (timeouts.current[juvenilId]) {
+      clearTimeout(timeouts.current[juvenilId]);
     }
+
+    timeouts.current[juvenilId] = setTimeout(async () => {
+      const { error } = await supabase
+        .from("avaliacoes")
+        .upsert(semId(novaRow), { onConflict: "data_avaliacao,juvenil_id" });
+
+      if (error) {
+        console.error("Erro ao salvar avaliação:", error.message, error);
+      } else {
+        setTodasAvaliacoes((prev) => {
+          const outras = prev.filter(
+            (a) =>
+              !(
+                a.juvenil_id === juvenilId &&
+                a.data_avaliacao === novaRow.data_avaliacao
+              )
+          );
+          return [...outras, novaRow];
+        });
+      }
+
+      delete timeouts.current[juvenilId];
+    }, 600);
   };
 
   /* ----------------------- Alternar todos presentes --------------- */
@@ -950,11 +1020,7 @@ export default function Home() {
   /* ----------------------- Renderização condicional -------------- */
 
   if (carregandoAuth) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-950">
-        <p className="text-slate-400">Carregando...</p>
-      </main>
-    );
+    return <SkeletonScreen />;
   }
 
   if (!userId) {
@@ -962,11 +1028,7 @@ export default function Home() {
   }
 
   if (!profile) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-950">
-        <p className="text-slate-400">Carregando perfil...</p>
-      </main>
-    );
+    return <SkeletonScreen />;
   }
 
   if (profile.must_change_password) {
@@ -974,11 +1036,7 @@ export default function Home() {
   }
 
   if (carregando && juvenis.length === 0) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
-        <p className="text-slate-600 dark:text-slate-300">Carregando...</p>
-      </main>
-    );
+    return <SkeletonScreen />;
   }
 
   /* ----------------------- UI principal -------------------------- */
@@ -1014,14 +1072,17 @@ export default function Home() {
               />
             </label>
 
+            {/* MELHORIA 6: prefetch para abrir instantaneamente */}
             <Link
               href="/ranking"
+              prefetch={true}
               className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-emerald-700"
             >
               🏆 Ver Ranking
             </Link>
             <Link
               href="/premiacoes"
+              prefetch={true}
               className="rounded-lg bg-amber-500 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-amber-600"
             >
               🏅 Premiações
@@ -1139,8 +1200,77 @@ export default function Home() {
           ))}
         </section>
 
-        <section className="overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">
-          <table className="w-full min-w-[640px] border-collapse text-sm">
+        {/* ========== MELHORIA 3: VISÃO CELULAR (cartões) ========== */}
+        <section className="space-y-3 sm:hidden">
+          {juvenis.map((j) => {
+            const row = avaliacoes[j.id];
+            const temPresenca = row?.presenca ?? false;
+            const total = calcularTotal(j.id);
+
+            return (
+              <div
+                key={j.id}
+                className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800"
+              >
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <button
+                    onClick={() => setJuvenilAberto(j)}
+                    className="text-left text-sm font-semibold text-slate-800 underline-offset-4 transition hover:text-emerald-700 hover:underline dark:text-slate-100 dark:hover:text-emerald-300"
+                  >
+                    {j.nome}
+                  </button>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-sm font-bold ${
+                      total === PONTUACAO_MAXIMA
+                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300"
+                        : total >= 60
+                          ? "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300"
+                          : total > 0
+                            ? "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200"
+                            : "bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500"
+                    }`}
+                  >
+                    {total}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  {CRITERIOS.map((c) => {
+                    const isPresenca = c === "presenca";
+                    const marcado = row?.[c] ?? false;
+                    const desabilitado = !isPresenca && !temPresenca;
+
+                    return (
+                      <label
+                        key={c}
+                        className={`flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-xs transition ${
+                          marcado
+                            ? "bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-200 dark:ring-emerald-800"
+                            : desabilitado
+                              ? "cursor-not-allowed bg-slate-50 text-slate-400 dark:bg-slate-800/40 dark:text-slate-500"
+                              : "bg-slate-50 text-slate-700 dark:bg-slate-800/60 dark:text-slate-300"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={marcado}
+                          disabled={desabilitado}
+                          onChange={() => alternarCriterio(j.id, c)}
+                          className="h-4 w-4 shrink-0 cursor-pointer rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 disabled:cursor-not-allowed dark:border-slate-600 dark:bg-slate-700"
+                        />
+                        <span className="truncate">{LABEL[c]}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </section>
+
+        {/* ========== VISÃO DESKTOP (tabela) ========== */}
+        <section className="hidden overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800 sm:block">
+          <table className="w-full border-collapse text-sm">
             <thead>
               <tr className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
                 <th className="px-4 py-3 text-left font-semibold">#</th>
