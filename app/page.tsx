@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase";
 
 /* ------------------------------------------------------------------ */
@@ -25,7 +26,6 @@ const SISTEMA_PONTOS = {
 } as const;
 
 type Criterio = keyof typeof SISTEMA_PONTOS;
-
 const CRITERIOS = Object.keys(SISTEMA_PONTOS) as Criterio[];
 
 const PONTUACAO_MAXIMA = CRITERIOS.reduce(
@@ -52,6 +52,14 @@ type AvaliacaoRow = {
   estudo_licao: boolean;
   verso_aureo: boolean;
   biblia: boolean;
+};
+
+type Profile = {
+  id: string;
+  nome: string;
+  email: string;
+  username: string | null;
+  must_change_password: boolean;
 };
 
 function semId<T extends { id?: number }>(obj: T): Omit<T, "id"> {
@@ -124,7 +132,23 @@ function calcularTotalLinha(row: AvaliacaoRow): number {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Medals                                                            */
+/*  Validação de senha forte                                          */
+/* ------------------------------------------------------------------ */
+
+function validarSenha(senha: string, nomeUsuario: string) {
+  const erros: string[] = [];
+  if (senha.length < 8) erros.push("Mínimo de 8 caracteres");
+  if (!/[A-Z]/.test(senha)) erros.push("Pelo menos 1 letra MAIÚSCULA");
+  if (!/[a-z]/.test(senha)) erros.push("Pelo menos 1 letra minúscula");
+  if (!/[0-9]/.test(senha)) erros.push("Pelo menos 1 número");
+  if (!/[^A-Za-z0-9]/.test(senha)) erros.push("Pelo menos 1 caractere especial");
+  if (nomeUsuario && senha.toLowerCase().includes(nomeUsuario.toLowerCase()))
+    erros.push("Não pode conter seu nome");
+  return erros;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Medalhas                                                          */
 /* ------------------------------------------------------------------ */
 
 type Medalha = {
@@ -203,24 +227,376 @@ function calcularMedalhas(avaliacoes: AvaliacaoRow[]): Medalha[] {
   return medalhas;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Componente                                                        */
-/* ------------------------------------------------------------------ */
+/* ================================================================== */
+/*  TELA DE LOGIN                                                     */
+/* ================================================================== */
+
+function LoginScreen() {
+  const supabase = createClient();
+  const [usuario, setUsuario] = useState("");
+  const [senha, setSenha] = useState("");
+  const [erro, setErro] = useState("");
+  const [carregando, setCarregando] = useState(false);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErro("");
+    setCarregando(true);
+
+    const emailCompleto = usuario.includes("@")
+      ? usuario.trim()
+      : `${usuario.trim().toLowerCase()}@soul.local`;
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: emailCompleto,
+      password: senha,
+    });
+
+    if (error) {
+      setErro("Usuário ou senha incorretos.");
+      setCarregando(false);
+      return;
+    }
+  };
+
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-slate-950 p-4">
+      <div className="w-full max-w-md">
+        <div className="animate-fade-in mb-8 flex justify-center">
+          <Image
+            src="/soul-em-cristo.png"
+            alt="Soul em Cristo"
+            width={360}
+            height={200}
+            className="h-auto w-full max-w-xs drop-shadow-2xl"
+            priority
+          />
+        </div>
+
+        <div className="animate-fade-in-lento rounded-2xl bg-slate-900 p-6 shadow-2xl ring-1 ring-slate-800">
+          <h1 className="mb-1 text-center text-2xl font-bold text-slate-100">
+            Bem-vindo(a) 👋
+          </h1>
+          <p className="mb-6 text-center text-sm text-slate-400">
+            Faça login para acessar o sistema
+          </p>
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-slate-300">
+                Usuário
+              </label>
+              <input
+                type="text"
+                value={usuario}
+                onChange={(e) => setUsuario(e.target.value)}
+                placeholder="bianca, cleide ou tobias"
+                autoComplete="username"
+                required
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2.5 text-slate-100 outline-none transition focus:border-emerald-500"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-slate-300">
+                Senha
+              </label>
+              <input
+                type="password"
+                value={senha}
+                onChange={(e) => setSenha(e.target.value)}
+                placeholder="Digite sua senha"
+                autoComplete="current-password"
+                required
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2.5 text-slate-100 outline-none transition focus:border-emerald-500"
+              />
+            </div>
+
+            {erro && (
+              <div className="rounded-lg bg-red-950/40 px-3 py-2 text-sm text-red-300 ring-1 ring-red-900">
+                {erro}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={carregando}
+              className="w-full rounded-lg bg-emerald-600 px-4 py-2.5 font-semibold text-white shadow-lg transition hover:bg-emerald-700 disabled:opacity-60"
+            >
+              {carregando ? "Entrando..." : "Entrar"}
+            </button>
+          </form>
+        </div>
+
+        <p className="animate-fade-in-bem-lento mt-6 text-center text-xs text-slate-500">
+          Sistema de Avaliação de Juvenis • Soul em Cristo
+        </p>
+      </div>
+    </main>
+  );
+}
+
+/* ================================================================== */
+/*  TELA DE TROCA OBRIGATÓRIA DE SENHA                                */
+/* ================================================================== */
+
+function TrocarSenhaScreen({ profile }: { profile: Profile }) {
+  const supabase = createClient();
+  const [novaSenha, setNovaSenha] = useState("");
+  const [confirmar, setConfirmar] = useState("");
+  const [erro, setErro] = useState("");
+  const [carregando, setCarregando] = useState(false);
+
+  const primeiroNome = profile.nome.split(" ")[0];
+  const erros = validarSenha(novaSenha, primeiroNome);
+  const senhaValida = novaSenha.length > 0 && erros.length === 0;
+  const senhasIguais = novaSenha === confirmar && confirmar.length > 0;
+
+  const handleSalvar = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErro("");
+
+    if (!senhaValida) {
+      setErro("A senha ainda não cumpre todos os requisitos.");
+      return;
+    }
+    if (!senhasIguais) {
+      setErro("As senhas não coincidem.");
+      return;
+    }
+
+    setCarregando(true);
+
+    const { error: errorAuth } = await supabase.auth.updateUser({
+      password: novaSenha,
+    });
+
+    if (errorAuth) {
+      setErro("Erro ao salvar: " + errorAuth.message);
+      setCarregando(false);
+      return;
+    }
+
+    const { error: errorProfile } = await supabase
+      .from("profiles")
+      .update({ must_change_password: false })
+      .eq("id", profile.id);
+
+    if (errorProfile) {
+      setErro("Erro ao atualizar perfil: " + errorProfile.message);
+      setCarregando(false);
+      return;
+    }
+
+    window.location.reload();
+  };
+
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-slate-950 p-4">
+      <div className="w-full max-w-lg">
+        <div className="animate-fade-in mb-6 flex justify-center">
+          <Image
+            src="/soul-em-cristo.png"
+            alt="Soul em Cristo"
+            width={280}
+            height={160}
+            className="h-auto w-full max-w-[200px] drop-shadow-2xl"
+          />
+        </div>
+
+        <div className="animate-fade-in-lento rounded-2xl bg-slate-900 p-6 shadow-2xl ring-1 ring-slate-800">
+          <div className="mb-5 rounded-lg bg-amber-950/40 px-4 py-3 text-sm text-amber-200 ring-1 ring-amber-800">
+            ⚠️ <strong>Primeiro acesso.</strong> Você precisa criar uma senha
+            pessoal antes de continuar.
+          </div>
+
+          <h1 className="mb-1 text-xl font-bold text-slate-100">
+            Olá, {primeiroNome}!
+          </h1>
+          <p className="mb-5 text-sm text-slate-400">
+            Crie uma senha única e pessoal. Ninguém mais saberá ela.
+          </p>
+
+          <form onSubmit={handleSalvar} className="space-y-4">
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-slate-300">
+                Nova senha
+              </label>
+              <input
+                type="password"
+                value={novaSenha}
+                onChange={(e) => setNovaSenha(e.target.value)}
+                placeholder="Digite sua nova senha"
+                autoComplete="new-password"
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2.5 text-slate-100 outline-none transition focus:border-emerald-500"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-slate-300">
+                Confirmar nova senha
+              </label>
+              <input
+                type="password"
+                value={confirmar}
+                onChange={(e) => setConfirmar(e.target.value)}
+                placeholder="Repita a senha"
+                autoComplete="new-password"
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2.5 text-slate-100 outline-none transition focus:border-emerald-500"
+              />
+            </div>
+
+            <div className="rounded-lg bg-slate-800/60 p-3 ring-1 ring-slate-700">
+              <p className="mb-2 text-xs font-semibold text-slate-300">
+                Requisitos da senha:
+              </p>
+              <ul className="space-y-1 text-xs">
+                {[
+                  { ok: novaSenha.length >= 8, txt: "Mínimo 8 caracteres" },
+                  { ok: /[A-Z]/.test(novaSenha), txt: "1 letra maiúscula" },
+                  { ok: /[a-z]/.test(novaSenha), txt: "1 letra minúscula" },
+                  { ok: /[0-9]/.test(novaSenha), txt: "1 número" },
+                  {
+                    ok: /[^A-Za-z0-9]/.test(novaSenha),
+                    txt: "1 caractere especial (@, #, $, ...)",
+                  },
+                  {
+                    ok:
+                      novaSenha.length > 0 &&
+                      !novaSenha
+                        .toLowerCase()
+                        .includes(primeiroNome.toLowerCase()),
+                    txt: `Não pode conter seu nome (${primeiroNome})`,
+                  },
+                ].map((r) => (
+                  <li
+                    key={r.txt}
+                    className={`flex items-center gap-2 ${
+                      r.ok ? "text-emerald-400" : "text-slate-500"
+                    }`}
+                  >
+                    <span>{r.ok ? "✓" : "○"}</span>
+                    <span>{r.txt}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {erro && (
+              <div className="rounded-lg bg-red-950/40 px-3 py-2 text-sm text-red-300 ring-1 ring-red-900">
+                {erro}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={carregando || !senhaValida || !senhasIguais}
+              className="w-full rounded-lg bg-emerald-600 px-4 py-2.5 font-semibold text-white shadow-lg transition hover:bg-emerald-700 disabled:opacity-40"
+            >
+              {carregando ? "Salvando..." : "Salvar nova senha"}
+            </button>
+          </form>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+/* ================================================================== */
+/*  COMPONENTE PRINCIPAL                                              */
+/* ================================================================== */
 
 export default function Home() {
   const supabase = createClient();
+
+  const [carregandoAuth, setCarregandoAuth] = useState(true);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
 
   const [juvenis, setJuvenis] = useState<Juvenil[]>([]);
   const [avaliacoes, setAvaliacoes] = useState<Record<number, AvaliacaoRow>>({});
   const [todasAvaliacoes, setTodasAvaliacoes] = useState<AvaliacaoRow[]>([]);
   const [carregando, setCarregando] = useState(true);
-  const [dark, setDark] = useState(false);
+  const [dark, setDark] = useState(true);
   const [dataSelecionada, setDataSelecionada] = useState<string>(hojeISO());
   const [juvenilAberto, setJuvenilAberto] = useState<Juvenil | null>(null);
 
-  /* ----------------------- Carregar do Supabase ------------------- */
+  /* ----------------------- Auth ---------------------------- */
 
   useEffect(() => {
+    let ativo = true;
+
+    async function verificar() {
+      const { data } = await supabase.auth.getSession();
+      if (!ativo) return;
+
+      if (data.session?.user) {
+        setUserId(data.session.user.id);
+      } else {
+        setCarregandoAuth(false);
+      }
+    }
+
+    verificar();
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setUserId(session.user.id);
+      } else {
+        setUserId(null);
+        setProfile(null);
+        setCarregandoAuth(false);
+      }
+    });
+
+    return () => {
+      ativo = false;
+      sub.subscription.unsubscribe();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!userId) return;
+
+    async function carregarProfile() {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, nome, email, username, must_change_password")
+        .eq("id", userId)
+        .single();
+
+      if (error || !data) {
+        console.error("Erro ao carregar perfil:", error);
+        setCarregandoAuth(false);
+        return;
+      }
+
+      await supabase
+        .from("profiles")
+        .update({ ultimo_login: new Date().toISOString() })
+        .eq("id", userId);
+
+      setProfile(data as Profile);
+      setCarregandoAuth(false);
+    }
+
+    carregarProfile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  const fazerLogout = async () => {
+    if (!confirm("Deseja realmente sair?")) return;
+    await supabase.auth.signOut();
+    setProfile(null);
+    setUserId(null);
+  };
+
+  /* ----------------------- Carregar dados ------------------------- */
+
+  useEffect(() => {
+    if (!profile || profile.must_change_password) return;
+
     async function carregarJuvenis() {
       const { data } = await supabase
         .from("juvenis")
@@ -230,18 +606,22 @@ export default function Home() {
     }
     carregarJuvenis();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [profile]);
 
   useEffect(() => {
+    if (!profile || profile.must_change_password) return;
+
     async function carregarTodas() {
       const { data } = await supabase.from("avaliacoes").select("*");
       setTodasAvaliacoes(data ?? []);
     }
     carregarTodas();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [profile]);
 
   useEffect(() => {
+    if (!profile || profile.must_change_password) return;
+
     async function carregarAvaliacoes() {
       setCarregando(true);
 
@@ -251,14 +631,7 @@ export default function Home() {
         .eq("data_avaliacao", dataSelecionada);
 
       if (error) {
-        console.error(
-          "Erro ao buscar avaliações:",
-          "message:", error.message,
-          "details:", error.details,
-          "hint:", error.hint,
-          "code:", error.code,
-          error
-        );
+        console.error("Erro ao buscar avaliações:", error.message, error);
         setCarregando(false);
         return;
       }
@@ -273,7 +646,7 @@ export default function Home() {
 
     carregarAvaliacoes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dataSelecionada]);
+  }, [dataSelecionada, profile]);
 
   /* ----------------------- Alternar critério ---------------------- */
 
@@ -311,10 +684,7 @@ export default function Home() {
         biblia: false,
       };
     } else {
-      novaRow = {
-        ...base,
-        [criterio]: !statusAtual,
-      };
+      novaRow = { ...base, [criterio]: !statusAtual };
     }
 
     setAvaliacoes((prev) => ({ ...prev, [juvenilId]: novaRow }));
@@ -342,7 +712,6 @@ export default function Home() {
 
   /* ----------------------- Alternar todos presentes --------------- */
 
-  // Verifica se TODOS os juvenis já estão marcados como presentes
   const todosPresentes = useMemo(() => {
     if (juvenis.length === 0) return false;
     return juvenis.every((j) => avaliacoes[j.id]?.presenca === true);
@@ -352,12 +721,9 @@ export default function Home() {
     const acao = todosPresentes
       ? "DESMARCAR a presença de TODOS"
       : "marcar presença de TODOS";
-    const confirmar = confirm(
-      `Deseja ${acao} os juvenis neste sábado?`
-    );
+    const confirmar = confirm(`Deseja ${acao} os juvenis neste sábado?`);
     if (!confirmar) return;
 
-    // Monta os registros SEM o campo id
     const novasAvaliacoes = juvenis.map((j) => {
       const rowAtual = avaliacoes[j.id];
       const base: AvaliacaoRow =
@@ -373,7 +739,6 @@ export default function Home() {
         };
 
       if (todosPresentes) {
-        // DESMARCAR: zera tudo (segue a mesma regra da presença individual)
         return {
           juvenil_id: j.id,
           data_avaliacao: dataSelecionada,
@@ -384,23 +749,19 @@ export default function Home() {
           verso_aureo: false,
           biblia: false,
         };
-      } else {
-        // MARCAR: liga a presença, mantém os outros critérios
-        return {
-          ...semId(base),
-          juvenil_id: j.id,
-          data_avaliacao: dataSelecionada,
-          presenca: true,
-        };
       }
+      return {
+        ...semId(base),
+        juvenil_id: j.id,
+        data_avaliacao: dataSelecionada,
+        presenca: true,
+      };
     });
 
-    // Atualiza o estado local (mantendo o id, se já existir)
     const novoMapa: Record<number, AvaliacaoRow> = { ...avaliacoes };
     juvenis.forEach((j) => {
       const anterior = avaliacoes[j.id];
       if (todosPresentes) {
-        // Desmarcar tudo
         novoMapa[j.id] = {
           ...(anterior ?? {
             juvenil_id: j.id,
@@ -416,7 +777,6 @@ export default function Home() {
           biblia: false,
         };
       } else {
-        // Marcar presença (mantém critérios)
         novoMapa[j.id] = {
           ...(anterior ?? {
             juvenil_id: j.id,
@@ -435,7 +795,6 @@ export default function Home() {
     });
     setAvaliacoes(novoMapa);
 
-    // Envia para o Supabase
     const { error } = await supabase
       .from("avaliacoes")
       .upsert(novasAvaliacoes, { onConflict: "data_avaliacao,juvenil_id" });
@@ -487,23 +846,29 @@ export default function Home() {
     [avaliacoes, juvenis]
   );
 
-  const aniversariantesSemana = useMemo(() => {
-    return juvenis.filter((j) =>
-      aniversarioNaSemana(j.aniversario_dia, j.aniversario_mes)
-    );
-  }, [juvenis]);
+  const aniversariantesSemana = useMemo(
+    () =>
+      juvenis.filter((j) =>
+        aniversarioNaSemana(j.aniversario_dia, j.aniversario_mes)
+      ),
+    [juvenis]
+  );
 
-  const aniversariantesHoje = useMemo(() => {
-    return juvenis.filter((j) =>
-      ehAniversarioHoje(j.aniversario_dia, j.aniversario_mes)
-    );
-  }, [juvenis]);
+  const aniversariantesHoje = useMemo(
+    () =>
+      juvenis.filter((j) =>
+        ehAniversarioHoje(j.aniversario_dia, j.aniversario_mes)
+      ),
+    [juvenis]
+  );
 
-  const aniversariantesMes = useMemo(() => {
-    return juvenis.filter((j) =>
-      ehAniversarioNoMes(j.aniversario_dia, j.aniversario_mes)
-    );
-  }, [juvenis]);
+  const aniversariantesMes = useMemo(
+    () =>
+      juvenis.filter((j) =>
+        ehAniversarioNoMes(j.aniversario_dia, j.aniversario_mes)
+      ),
+    [juvenis]
+  );
 
   const liderTrimestre = useMemo(() => {
     const tri = trimestreAtual();
@@ -517,13 +882,12 @@ export default function Home() {
       const [anoStr, mesStr] = a.data_avaliacao.split("-");
       if (Number(anoStr) !== ano) return;
       if (!meses.includes(Number(mesStr))) return;
-
       CRITERIOS.forEach((c) => {
         if (a[c]) somas[a.juvenil_id] += SISTEMA_PONTOS[c];
       });
     });
 
-        const candidatos = juvenis.map((j) => ({
+    const candidatos = juvenis.map((j) => ({
       nome: j.nome,
       total: somas[j.id] ?? 0,
     }));
@@ -545,9 +909,7 @@ export default function Home() {
   }, [todasAvaliacoes, juvenilAberto]);
 
   const statsJuvenil = useMemo(() => {
-    if (!juvenilAberto || historicoJuvenil.length === 0) {
-      return null;
-    }
+    if (!juvenilAberto || historicoJuvenil.length === 0) return null;
     const total = historicoJuvenil.reduce(
       (s, a) => s + calcularTotalLinha(a),
       0
@@ -557,7 +919,6 @@ export default function Home() {
     const percentual = Math.round((presencas / historicoJuvenil.length) * 100);
     const media = Math.round(total / historicoJuvenil.length);
     const recorde = Math.max(...historicoJuvenil.map(calcularTotalLinha));
-
     return { total, presencas, faltas, percentual, media, recorde };
   }, [juvenilAberto, historicoJuvenil]);
 
@@ -576,7 +937,6 @@ export default function Home() {
   const alternarTema = () => {
     const root = document.documentElement;
     const novo = !dark;
-
     if (novo) {
       root.classList.add("dark");
       localStorage.setItem("tema-juvenis", "dark");
@@ -584,11 +944,34 @@ export default function Home() {
       root.classList.remove("dark");
       localStorage.setItem("tema-juvenis", "light");
     }
-
     setDark(novo);
   };
 
-  /* ----------------------- UI ------------------------------------ */
+  /* ----------------------- Renderização condicional -------------- */
+
+  if (carregandoAuth) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-950">
+        <p className="text-slate-400">Carregando...</p>
+      </main>
+    );
+  }
+
+  if (!userId) {
+    return <LoginScreen />;
+  }
+
+  if (!profile) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-950">
+        <p className="text-slate-400">Carregando perfil...</p>
+      </main>
+    );
+  }
+
+  if (profile.must_change_password) {
+    return <TrocarSenhaScreen profile={profile} />;
+  }
 
   if (carregando && juvenis.length === 0) {
     return (
@@ -597,6 +980,8 @@ export default function Home() {
       </main>
     );
   }
+
+  /* ----------------------- UI principal -------------------------- */
 
   return (
     <main className="min-h-screen bg-slate-50 p-4 transition-colors dark:bg-slate-950 dark:text-slate-100 sm:p-8">
@@ -614,7 +999,11 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              👤 {profile.nome}
+            </span>
+
             <label className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800">
               <span className="text-slate-500 dark:text-slate-400">📅</span>
               <input
@@ -643,6 +1032,13 @@ export default function Home() {
               className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
             >
               {dark ? "☀️ Claro" : "🌙 Escuro"}
+            </button>
+
+            <button
+              onClick={fazerLogout}
+              className="rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-600 transition hover:bg-red-50 dark:border-red-800 dark:bg-slate-800 dark:text-red-400 dark:hover:bg-red-950/40"
+            >
+              Sair
             </button>
           </div>
         </header>
@@ -688,7 +1084,6 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Painel de Aniversariantes */}
         {aniversariantesHoje.length > 0 ? (
           <div className="mb-4 rounded-xl bg-yellow-100 px-4 py-3 text-sm font-semibold text-yellow-900 ring-2 ring-yellow-400 dark:bg-yellow-900/50 dark:text-yellow-200 dark:ring-yellow-500">
             🎉 Hoje é aniversário de{" "}
@@ -711,7 +1106,6 @@ export default function Home() {
           )
         )}
 
-        {/* Aviso da data + botão marcar/desmarcar todos */}
         <div className="mb-4 flex flex-col gap-2 rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-800 ring-1 ring-blue-200 dark:bg-blue-950/40 dark:text-blue-200 dark:ring-blue-900 sm:flex-row sm:items-center sm:justify-between">
           <span>
             Avaliando o sábado de{" "}
@@ -881,7 +1275,7 @@ export default function Home() {
         )}
       </div>
 
-      {/* ============== MODAL DE HISTÓRICO DO JUVENIL ============== */}
+      {/* MODAL */}
       {juvenilAberto && (
         <div
           className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm"

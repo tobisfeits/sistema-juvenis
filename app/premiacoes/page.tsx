@@ -70,6 +70,8 @@ export default function PremiacoesPage() {
   const [premiacoes, setPremiacoes] = useState<PremiacaoRow[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [dark, setDark] = useState(false);
+  const [verificandoAuth, setVerificandoAuth] = useState(true);
+  const [logado, setLogado] = useState(false);
 
   const anoAtual = new Date().getFullYear();
 
@@ -94,6 +96,16 @@ export default function PremiacoesPage() {
   useEffect(() => {
     const estaEscuro = document.documentElement.classList.contains("dark");
     setDark(estaEscuro);
+  }, []);
+
+  useEffect(() => {
+    async function checar() {
+      const { data } = await supabase.auth.getSession();
+      setLogado(!!data.session);
+      setVerificandoAuth(false);
+    }
+    checar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const alternarTema = () => {
@@ -223,6 +235,32 @@ export default function PremiacoesPage() {
   };
 
   /* ----------------------- UI ------------------------------------ */
+
+  if (verificandoAuth) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-950">
+        <p className="text-slate-400">Verificando acesso...</p>
+      </main>
+    );
+  }
+
+  if (!logado) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-950 p-4">
+        <div className="rounded-2xl bg-slate-900 p-8 text-center ring-1 ring-slate-800">
+          <p className="mb-4 text-slate-300">
+            Você precisa estar logado para acessar esta página.
+          </p>
+          <a
+            href="/"
+            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
+          >
+            Ir para o login
+          </a>
+        </div>
+      </main>
+    );
+  }
 
   if (carregando) {
     return (
