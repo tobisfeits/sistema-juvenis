@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase";
+import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 
 /* ------------------------------------------------------------------ */
 /*  Tipos e constantes                                                */
@@ -510,10 +511,8 @@ function SkeletonScreen() {
   return (
     <main className="min-h-screen bg-slate-50 p-4 dark:bg-slate-950 sm:p-8">
       <div className="mx-auto max-w-6xl space-y-4">
-        {/* Cabeçalho */}
         <div className="h-16 animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
 
-        {/* Dashboard */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[1, 2, 3, 4].map((i) => (
             <div
@@ -523,10 +522,8 @@ function SkeletonScreen() {
           ))}
         </div>
 
-        {/* Faixa azul */}
         <div className="h-16 animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
 
-        {/* Cartões (celular) */}
         <div className="space-y-3 sm:hidden">
           {[1, 2, 3].map((i) => (
             <div
@@ -536,7 +533,6 @@ function SkeletonScreen() {
           ))}
         </div>
 
-        {/* Tabela (desktop) */}
         <div className="hidden sm:block">
           {[1, 2, 3, 4, 5].map((i) => (
             <div
@@ -569,7 +565,6 @@ export default function Home() {
   const [dataSelecionada, setDataSelecionada] = useState<string>(hojeISO());
   const [juvenilAberto, setJuvenilAberto] = useState<Juvenil | null>(null);
 
-  // Debounce: agrupa cliques rápidos em uma única requisição
   const timeouts = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
 
   /* ----------------------- Auth ---------------------------- */
@@ -590,15 +585,17 @@ export default function Home() {
 
     verificar();
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        setUserId(session.user.id);
-      } else {
-        setUserId(null);
-        setProfile(null);
-        setCarregandoAuth(false);
+    const { data: sub } = supabase.auth.onAuthStateChange(
+      (_event: AuthChangeEvent, session: Session | null) => {
+        if (session?.user) {
+          setUserId(session.user.id);
+        } else {
+          setUserId(null);
+          setProfile(null);
+          setCarregandoAuth(false);
+        }
       }
-    });
+    );
 
     return () => {
       ativo = false;
@@ -659,7 +656,7 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
-  // MELHORIA 2: Só carrega os últimos 6 meses (não o histórico inteiro)
+  // MELHORIA 2: carrega apenas os últimos 6 meses de histórico
   useEffect(() => {
     if (!profile || profile.must_change_password) return;
 
@@ -709,7 +706,7 @@ export default function Home() {
   }, [dataSelecionada, profile]);
 
   /* ----------------------- Alternar critério ---------------------- */
-  /* MELHORIA 5: Debounce — agrupa cliques rápidos em 1 requisição    */
+  /* MELHORIA 5: debounce de 600ms para agrupar cliques rápidos     */
 
   const alternarCriterio = (juvenilId: number, criterio: Criterio) => {
     const rowAtual = avaliacoes[juvenilId];
@@ -748,10 +745,8 @@ export default function Home() {
       novaRow = { ...base, [criterio]: !statusAtual };
     }
 
-    // Atualiza UI imediatamente (feedback visual na hora)
     setAvaliacoes((prev) => ({ ...prev, [juvenilId]: novaRow }));
 
-    // Cancela o timeout anterior do MESMO juvenil e agenda um novo
     if (timeouts.current[juvenilId]) {
       clearTimeout(timeouts.current[juvenilId]);
     }
@@ -1072,7 +1067,6 @@ export default function Home() {
               />
             </label>
 
-            {/* MELHORIA 6: prefetch para abrir instantaneamente */}
             <Link
               href="/ranking"
               prefetch={true}
@@ -1104,7 +1098,6 @@ export default function Home() {
           </div>
         </header>
 
-        {/* DASHBOARD */}
         <section className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">
             <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
@@ -1200,7 +1193,7 @@ export default function Home() {
           ))}
         </section>
 
-        {/* ========== MELHORIA 3: VISÃO CELULAR (cartões) ========== */}
+        {/* ========== VISÃO CELULAR (cartões) ========== */}
         <section className="space-y-3 sm:hidden">
           {juvenis.map((j) => {
             const row = avaliacoes[j.id];
