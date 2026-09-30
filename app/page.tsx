@@ -7,6 +7,13 @@ import { createClient } from "@/lib/supabase";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 
 /* ------------------------------------------------------------------ */
+/*  Constantes de inatividade                                         */
+/* ------------------------------------------------------------------ */
+
+const TEMPO_INATIVIDADE_MS = 5 * 60 * 1000; // 5 minutos
+const TEMPO_AVISO_MS = 2 * 60 * 1000; // Aviso 2 minutos antes
+
+/* ------------------------------------------------------------------ */
 /*  Tipos e constantes                                                */
 /* ------------------------------------------------------------------ */
 
@@ -700,7 +707,7 @@ function ModalNovoJuvenil({
 }
 
 /* ================================================================== */
-/*  MODAL: GERENCIAR JUVENIS (inativar / reativar)                    */
+/*  MODAL: GERENCIAR JUVENIS                                          */
 /* ================================================================== */
 
 function ModalGerenciarJuvenis({
@@ -771,7 +778,6 @@ function ModalGerenciarJuvenis({
         </div>
 
         <div className="max-h-[70vh] overflow-y-auto p-5">
-          {/* Ativos */}
           <section className="mb-6">
             <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
               ✅ Ativos ({ativos.length})
@@ -797,7 +803,6 @@ function ModalGerenciarJuvenis({
             </ul>
           </section>
 
-          {/* Inativos */}
           {inativos.length > 0 && (
             <section>
               <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
@@ -837,6 +842,47 @@ function ModalGerenciarJuvenis({
 }
 
 /* ================================================================== */
+/*  MODAL: AVISO DE INATIVIDADE                                       */
+/* ================================================================== */
+
+function ModalAvisoInatividade({
+  segundos,
+  onContinuar,
+}: {
+  segundos: number;
+  onContinuar: () => void;
+}) {
+  const minutos = Math.floor(segundos / 60);
+  const seg = segundos % 60;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-2xl ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-700">
+        <div className="mb-3 text-5xl">⏰</div>
+        <h2 className="mb-2 text-xl font-bold text-slate-800 dark:text-slate-100">
+          Você ainda está aí?
+        </h2>
+        <p className="mb-4 text-sm text-slate-600 dark:text-slate-400">
+          Por segurança, vamos encerrar sua sessão por inatividade em:
+        </p>
+        <div className="mb-5 text-3xl font-bold text-amber-600 dark:text-amber-400">
+          {String(minutos).padStart(2, "0")}:{String(seg).padStart(2, "0")}
+        </div>
+        <button
+          onClick={onContinuar}
+          className="w-full rounded-lg bg-emerald-600 px-4 py-3 font-semibold text-white shadow-lg transition hover:bg-emerald-700"
+        >
+          ✅ Continuar conectado
+        </button>
+        <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-500">
+          Se não houver interação, você será desconectado automaticamente.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================== */
 /*  COMPONENTE PRINCIPAL                                              */
 /* ================================================================== */
 
@@ -857,6 +903,14 @@ export default function Home() {
 
   const [modalNovoAberto, setModalNovoAberto] = useState(false);
   const [modalGerenciarAberto, setModalGerenciarAberto] = useState(false);
+
+  // Controle de inatividade
+  const [mostrarAvisoInatividade, setMostrarAvisoInatividade] = useState(false);
+  const [segundosRestantes, setSegundosRestantes] = useState(
+    Math.floor(TEMPO_AVISO_MS / 1000)
+  );
+  const ultimaAtividade = useRef(Date.now());
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const timeouts = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
 
@@ -932,6 +986,60 @@ export default function Home() {
     setProfile(null);
     setUserId(null);
   };
+
+  /* ----------------------- Auto-logout por inatividade ------------ */
+
+  useEffect(() => {
+    if (!profile || profile.must_change_password) return;
+
+    // Reinicia o contador a cada interação do usuário
+    const registrarAtividade = () => {
+      ultimaAtividade.current = Date.now();
+      setMostrarAvisoInatividade(false);
+      setSegundosRestantes(Math.floor(TEMPO_AVISO_MS / 1000));
+    };
+
+    const eventos = [
+      "mousedown",
+      "mousemove",
+      "keydown",
+      "scroll",
+      "touchstart",
+      "click",
+    ];
+
+    eventos.forEach((evento) =>
+      window.addEventListener(evento, registrarAtividade, { passive: true })
+    );
+
+    // Verifica a cada 10 segundos se já passou do tempo
+    intervalRef.current = setInterval(() => {
+      const inativo = Date.now() - ultimaAtividade.current;
+
+      if (inativo >= TEMPO_INATIVIDADE_MS) {
+        // Tempo total esgotado: faz logout
+        supabase.auth.signOut().then(() => {
+          setProfile(null);
+          setUserId(null);
+        });
+      } else if (inativo >= TEMPO_INATIVIDADE_MS - TEMPO_AVISO_MS) {
+        // Está no período de aviso
+        setMostrarAvisoInatividade(true);
+        const restante = Math.floor((TEMPO_INATIVIDADE_MS - inativo) / 1000);
+        setSegundosRestantes(restante);
+      } else {
+        setMostrarAvisoInatividade(false);
+      }
+    }, 10000); // A cada 10 segundos
+
+    return () => {
+      eventos.forEach((evento) =>
+        window.removeEventListener(evento, registrarAtividade)
+      );
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile]);
 
   /* ----------------------- Carregar dados ------------------------- */
 
@@ -1353,7 +1461,6 @@ export default function Home() {
               />
             </label>
 
-            {/* NOVO: botão cadastrar juvenil */}
             <button
               onClick={() => setModalNovoAberto(true)}
               className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-blue-700"
@@ -1361,7 +1468,6 @@ export default function Home() {
               ➕ Novo Juvenil
             </button>
 
-            {/* NOVO: botão gerenciar */}
             <button
               onClick={() => setModalGerenciarAberto(true)}
               className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
@@ -1495,7 +1601,6 @@ export default function Home() {
           ))}
         </section>
 
-        {/* ========== VISÃO CELULAR (cartões) ========== */}
         <section className="space-y-3 sm:hidden">
           {juvenisAtivos.map((j) => {
             const row = avaliacoes[j.id];
@@ -1563,7 +1668,6 @@ export default function Home() {
           })}
         </section>
 
-        {/* ========== VISÃO DESKTOP (tabela) ========== */}
         <section className="hidden overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800 sm:block">
           <table className="w-full border-collapse text-sm">
             <thead>
@@ -1939,6 +2043,18 @@ export default function Home() {
           juvenis={juvenis}
           onFechar={() => setModalGerenciarAberto(false)}
           onAtualizado={() => carregarJuvenis()}
+        />
+      )}
+
+      {/* MODAL: AVISO DE INATIVIDADE */}
+      {mostrarAvisoInatividade && (
+        <ModalAvisoInatividade
+          segundos={segundosRestantes}
+          onContinuar={() => {
+            ultimaAtividade.current = Date.now();
+            setMostrarAvisoInatividade(false);
+            setSegundosRestantes(Math.floor(TEMPO_AVISO_MS / 1000));
+          }}
         />
       )}
     </main>
