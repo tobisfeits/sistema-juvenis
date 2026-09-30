@@ -11,7 +11,7 @@ import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 /* ------------------------------------------------------------------ */
 
 const TEMPO_INATIVIDADE_MS = 5 * 60 * 1000; // 5 minutos
-const TEMPO_AVISO_MS = 2 * 60 * 1000; // Aviso 2 minutos antes
+const TEMPO_AVISO_MS = 1 * 60 * 1000; // Aviso 1 minuto antes
 
 /* ------------------------------------------------------------------ */
 /*  Tipos e constantes                                                */
@@ -912,7 +912,15 @@ export default function Home() {
   const ultimaAtividade = useRef(Date.now());
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Refs para evitar conflitos de concorrência
+  const avaliacoesRef = useRef<Record<number, AvaliacaoRow>>({});
   const timeouts = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
+  const camposPendentes = useRef<Record<number, Set<Criterio>>>({});
+
+  // Mantém avaliacoesRef sincronizado
+  useEffect(() => {
+    avaliacoesRef.current = avaliacoes;
+  }, [avaliacoes]);
 
   /* ----------------------- Auth ---------------------------- */
 
@@ -992,7 +1000,6 @@ export default function Home() {
   useEffect(() => {
     if (!profile || profile.must_change_password) return;
 
-    // Reinicia o contador a cada interação do usuário
     const registrarAtividade = () => {
       ultimaAtividade.current = Date.now();
       setMostrarAvisoInatividade(false);
@@ -1012,25 +1019,22 @@ export default function Home() {
       window.addEventListener(evento, registrarAtividade, { passive: true })
     );
 
-    // Verifica a cada 10 segundos se já passou do tempo
     intervalRef.current = setInterval(() => {
       const inativo = Date.now() - ultimaAtividade.current;
 
       if (inativo >= TEMPO_INATIVIDADE_MS) {
-        // Tempo total esgotado: faz logout
         supabase.auth.signOut().then(() => {
           setProfile(null);
           setUserId(null);
         });
       } else if (inativo >= TEMPO_INATIVIDADE_MS - TEMPO_AVISO_MS) {
-        // Está no período de aviso
         setMostrarAvisoInatividade(true);
         const restante = Math.floor((TEMPO_INATIVIDADE_MS - inativo) / 1000);
         setSegundosRestantes(restante);
       } else {
         setMostrarAvisoInatividade(false);
       }
-    }, 10000); // A cada 10 segundos
+    }, 10000);
 
     return () => {
       eventos.forEach((evento) =>
@@ -1113,6 +1117,7 @@ export default function Home() {
   );
 
   /* ----------------------- Alternar critério ---------------------- */
+  /* NOVO: envia apenas o campo alterado — evita conflito entre usuários */
 
   const alternarCriterio = (juvenilId: number, criterio: Criterio) => {
     const rowAtual = avaliacoes[juvenilId];
@@ -1136,8 +1141,10 @@ export default function Home() {
     if (!isPresenca && !temPresenca) return;
 
     let novaRow: AvaliacaoRow;
+    const camposMudados: Criterio[] = [];
 
     if (isPresenca && statusAtual) {
+      // Desmarcar presença: zera TUDO (intencional)
       novaRow = {
         ...base,
         presenca: false,
@@ -1147,36 +1154,70 @@ export default function Home() {
         verso_aureo: false,
         biblia: false,
       };
+      camposMudados.push(
+        "presenca",
+        "pontualidade",
+        "participacao",
+        "estudo_licao",
+        "verso_aureo",
+        "biblia"
+      );
     } else {
       novaRow = { ...base, [criterio]: !statusAtual };
+      camposMudados.push(criterio);
     }
 
     setAvaliacoes((prev) => ({ ...prev, [juvenilId]: novaRow }));
 
+    // Acumula os campos que precisam ser salvos
+    if (!camposPendentes.current[juvenilId]) {
+      camposPendentes.current[juvenilId] = new Set();
+    }
+    camposMudados.forEach((c) =>
+      camposPendentes.current[juvenilId].add(c)
+    );
+
+    // Cancela timeout anterior e agenda novo
     if (timeouts.current[juvenilId]) {
       clearTimeout(timeouts.current[juvenilId]);
     }
 
     timeouts.current[juvenilId] = setTimeout(async () => {
+      const camposParaSalvar = camposPendentes.current[juvenilId];
+      const rowFinal = avaliacoesRef.current[juvenilId];
+
+      if (!camposParaSalvar || !rowFinal) return;
+
+      // Monta objeto apenas com os campos alterados
+      const updateParcial: Record<string, boolean> = {};
+      camposParaSalvar.forEach((c) => {
+        updateParcial[c] = rowFinal[c];
+      });
+
+      // PASSO 1: garante que a linha existe (sem sobrescrever nada)
+      await supabase.from("avaliacoes").upsert(
+        {
+          juvenil_id: juvenilId,
+          data_avaliacao: dataSelecionada,
+        },
+        {
+          onConflict: "data_avaliacao,juvenil_id",
+          ignoreDuplicates: true,
+        }
+      );
+
+      // PASSO 2: atualiza APENAS os campos alterados
       const { error } = await supabase
         .from("avaliacoes")
-        .upsert(semId(novaRow), { onConflict: "data_avaliacao,juvenil_id" });
+        .update(updateParcial)
+        .eq("juvenil_id", juvenilId)
+        .eq("data_avaliacao", dataSelecionada);
 
       if (error) {
         console.error("Erro ao salvar avaliação:", error.message, error);
-      } else {
-        setTodasAvaliacoes((prev) => {
-          const outras = prev.filter(
-            (a) =>
-              !(
-                a.juvenil_id === juvenilId &&
-                a.data_avaliacao === novaRow.data_avaliacao
-              )
-          );
-          return [...outras, novaRow];
-        });
       }
 
+      delete camposPendentes.current[juvenilId];
       delete timeouts.current[juvenilId];
     }, 600);
   };
@@ -1195,40 +1236,11 @@ export default function Home() {
     const confirmar = confirm(`Deseja ${acao} os juvenis ativos neste sábado?`);
     if (!confirmar) return;
 
-    const novasAvaliacoes = juvenisAtivos.map((j) => {
-      const rowAtual = avaliacoes[j.id];
-      const base: AvaliacaoRow =
-        rowAtual ?? {
-          juvenil_id: j.id,
-          data_avaliacao: dataSelecionada,
-          presenca: false,
-          pontualidade: false,
-          participacao: false,
-          estudo_licao: false,
-          verso_aureo: false,
-          biblia: false,
-        };
+    const ids = juvenisAtivos.map((j) => j.id);
 
-      if (todosPresentes) {
-        return {
-          juvenil_id: j.id,
-          data_avaliacao: dataSelecionada,
-          presenca: false,
-          pontualidade: false,
-          participacao: false,
-          estudo_licao: false,
-          verso_aureo: false,
-          biblia: false,
-        };
-      }
-      return {
-        ...semId(base),
-        juvenil_id: j.id,
-        data_avaliacao: dataSelecionada,
-        presenca: true,
-      };
-    });
+    if (ids.length === 0) return;
 
+    // Atualiza estado local otimista
     const novoMapa: Record<number, AvaliacaoRow> = { ...avaliacoes };
     juvenisAtivos.forEach((j) => {
       const anterior = avaliacoes[j.id];
@@ -1237,6 +1249,11 @@ export default function Home() {
           ...(anterior ?? {
             juvenil_id: j.id,
             data_avaliacao: dataSelecionada,
+            pontualidade: false,
+            participacao: false,
+            estudo_licao: false,
+            verso_aureo: false,
+            biblia: false,
           }),
           juvenil_id: j.id,
           data_avaliacao: dataSelecionada,
@@ -1266,32 +1283,66 @@ export default function Home() {
     });
     setAvaliacoes(novoMapa);
 
-    const { error } = await supabase
-      .from("avaliacoes")
-      .upsert(novasAvaliacoes, { onConflict: "data_avaliacao,juvenil_id" });
+    // PASSO 1: garante que todas as linhas existem
+    await supabase.from("avaliacoes").upsert(
+      juvenisAtivos.map((j) => ({
+        juvenil_id: j.id,
+        data_avaliacao: dataSelecionada,
+      })),
+      {
+        onConflict: "data_avaliacao,juvenil_id",
+        ignoreDuplicates: true,
+      }
+    );
 
-    if (error) {
-      console.error("Erro ao alternar todos presentes:", error.message, error);
-      alert(`Erro ao salvar: ${error.message}`);
-    } else {
-      const { data } = await supabase
+    // PASSO 2: atualiza apenas as colunas apropriadas
+    if (todosPresentes) {
+      const { error } = await supabase
         .from("avaliacoes")
-        .select("*")
-        .eq("data_avaliacao", dataSelecionada);
+        .update({
+          presenca: false,
+          pontualidade: false,
+          participacao: false,
+          estudo_licao: false,
+          verso_aureo: false,
+          biblia: false,
+        })
+        .eq("data_avaliacao", dataSelecionada)
+        .in("juvenil_id", ids);
 
-      const mapa: Record<number, AvaliacaoRow> = {};
-      (data ?? []).forEach((row: AvaliacaoRow) => {
-        mapa[row.juvenil_id] = row;
-      });
-      setAvaliacoes(mapa);
+      if (error) {
+        console.error("Erro ao desmarcar todos:", error.message, error);
+      }
+    } else {
+      const { error } = await supabase
+        .from("avaliacoes")
+        .update({ presenca: true })
+        .eq("data_avaliacao", dataSelecionada)
+        .in("juvenil_id", ids);
 
-      setTodasAvaliacoes((prev) => {
-        const filtradas = prev.filter(
-          (a) => a.data_avaliacao !== dataSelecionada
-        );
-        return [...filtradas, ...(data ?? [])];
-      });
+      if (error) {
+        console.error("Erro ao marcar todos:", error.message, error);
+      }
     }
+
+    // Recarrega do banco para pegar o estado real
+    const { data } = await supabase
+      .from("avaliacoes")
+      .select("*")
+      .eq("data_avaliacao", dataSelecionada);
+
+    const mapa: Record<number, AvaliacaoRow> = {};
+    (data ?? []).forEach((row: AvaliacaoRow) => {
+      mapa[row.juvenil_id] = row;
+    });
+    setAvaliacoes(mapa);
+
+    setTodasAvaliacoes((prev) => {
+      const filtradas = prev.filter(
+        (a) => a.data_avaliacao !== dataSelecionada
+      );
+      return [...filtradas, ...(data ?? [])];
+    });
   };
 
   /* ----------------------- Cálculo de total ---------------------- */
