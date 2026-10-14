@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase";
@@ -71,11 +71,6 @@ type Profile = {
   must_change_password: boolean;
 };
 
-function semId<T extends { id?: number }>(obj: T): Omit<T, "id"> {
-  const { id: _ignorar, ...resto } = obj;
-  return resto;
-}
-
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
 /* ------------------------------------------------------------------ */
@@ -91,6 +86,22 @@ function hojeISO(): string {
 function formatarDataBR(iso: string): string {
   const [ano, mes, dia] = iso.split("-");
   return `${dia}/${mes}/${ano}`;
+}
+
+function criarAvaliacaoVazia(
+  juvenilId: number,
+  dataAvaliacao: string
+): AvaliacaoRow {
+  return {
+    juvenil_id: juvenilId,
+    data_avaliacao: dataAvaliacao,
+    presenca: false,
+    pontualidade: false,
+    participacao: false,
+    estudo_licao: false,
+    verso_aureo: false,
+    biblia: false,
+  };
 }
 
 function aniversarioNaSemana(dia: number | null, mes: number | null): boolean {
@@ -241,11 +252,12 @@ function calcularMedalhas(avaliacoes: AvaliacaoRow[]): Medalha[] {
 /* ================================================================== */
 
 function LoginScreen() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [usuario, setUsuario] = useState("");
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState("");
   const [carregando, setCarregando] = useState(false);
+  const [mostrarSenha, setMostrarSenha] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -269,77 +281,127 @@ function LoginScreen() {
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-950 p-4">
-      <div className="w-full max-w-md">
-        <div className="animate-fade-in mb-8 flex justify-center">
-          <Image
-            src="/soul-em-cristo.png"
-            alt="Soul em Cristo"
-            width={360}
-            height={200}
-            className="h-auto w-full max-w-xs drop-shadow-2xl"
-            priority
-          />
-        </div>
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 p-4">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -top-32 left-1/2 h-72 w-72 -translate-x-1/2 animate-pulse rounded-full bg-purple-600/20 blur-3xl" />
+        <div
+          className="absolute -bottom-32 right-1/4 h-80 w-80 animate-pulse rounded-full bg-fuchsia-600/15 blur-3xl"
+          style={{ animationDelay: "1.5s" }}
+        />
+      </div>
 
-        <div className="animate-fade-in-lento rounded-2xl bg-slate-900 p-6 shadow-2xl ring-1 ring-slate-800">
-          <h1 className="mb-1 text-center text-2xl font-bold text-slate-100">
-            Bem-vindo(a) 👋
-          </h1>
-          <p className="mb-6 text-center text-sm text-slate-400">
-            Faça login para acessar o sistema
-          </p>
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.07]"
+        style={{
+          backgroundImage:
+            "radial-gradient(circle, white 1px, transparent 1px)",
+          backgroundSize: "24px 24px",
+        }}
+      />
 
-          <form onSubmit={handleLogin} className="space-y-4">
+      <div className="relative z-10 w-full max-w-sm">
+        <div className="animate-fade-in-lento relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-b from-slate-900/90 to-slate-950/90 p-5 shadow-2xl backdrop-blur-xl">
+          <div className="absolute -top-px left-1/2 h-px w-3/4 -translate-x-1/2 bg-gradient-to-r from-transparent via-purple-400 to-transparent" />
+
+          <div className="mb-4 flex justify-center">
+            <Image
+              src="/soul-em-cristo.png"
+              alt="Soul em Cristo"
+              width={140}
+              height={80}
+              className="h-auto w-full max-w-[130px] drop-shadow-lg"
+              priority
+            />
+          </div>
+
+          <div className="mb-5 text-center">
+            <h1 className="text-xl font-black tracking-tight text-white">
+              Bem-vindo(a) 👋
+            </h1>
+            <p className="mt-1 text-xs font-medium text-slate-400">
+              Entre pra fazer a chamada de hoje
+            </p>
+          </div>
+
+          <form onSubmit={handleLogin} className="space-y-3">
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-300">
+              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-purple-300">
                 Usuário
               </label>
-              <input
-                type="text"
-                value={usuario}
-                onChange={(e) => setUsuario(e.target.value)}
-                placeholder="bianca, cleide ou tobias"
-                autoComplete="username"
-                required
-                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2.5 text-slate-100 outline-none transition focus:border-emerald-500"
-              />
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-base">
+                  👤
+                </span>
+                <input
+                  type="text"
+                  value={usuario}
+                  onChange={(e) => setUsuario(e.target.value)}
+                  placeholder="bianca, cleide ou tobias"
+                  autoComplete="username"
+                  required
+                  className="w-full rounded-xl border border-white/10 bg-white/5 py-3 pl-10 pr-3 text-sm text-slate-100 placeholder-slate-500 outline-none transition-all focus:border-purple-400 focus:bg-white/10 focus:ring-2 focus:ring-purple-500/30"
+                />
+              </div>
             </div>
 
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-300">
+              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-fuchsia-300">
                 Senha
               </label>
-              <input
-                type="password"
-                value={senha}
-                onChange={(e) => setSenha(e.target.value)}
-                placeholder="Digite sua senha"
-                autoComplete="current-password"
-                required
-                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2.5 text-slate-100 outline-none transition focus:border-emerald-500"
-              />
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-base">
+                  🔒
+                </span>
+                <input
+                  type={mostrarSenha ? "text" : "password"}
+                  value={senha}
+                  onChange={(e) => setSenha(e.target.value)}
+                  placeholder="Digite sua senha"
+                  autoComplete="current-password"
+                  required
+                  className="w-full rounded-xl border border-white/10 bg-white/5 py-3 pl-10 pr-11 text-sm text-slate-100 placeholder-slate-500 outline-none transition-all focus:border-fuchsia-400 focus:bg-white/10 focus:ring-2 focus:ring-fuchsia-500/30"
+                />
+                <button
+                  type="button"
+                  onClick={() => setMostrarSenha(!mostrarSenha)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-base opacity-60 transition hover:opacity-100"
+                  aria-label={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
+                >
+                  {mostrarSenha ? "🙈" : "👁️"}
+                </button>
+              </div>
             </div>
 
             {erro && (
-              <div className="rounded-lg bg-red-950/40 px-3 py-2 text-sm text-red-300 ring-1 ring-red-900">
-                {erro}
+              <div className="flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-950/40 px-3 py-2.5 text-xs font-medium text-red-300">
+                <span>⚠️</span>
+                <span>{erro}</span>
               </div>
             )}
 
             <button
               type="submit"
               disabled={carregando}
-              className="w-full rounded-lg bg-emerald-600 px-4 py-2.5 font-semibold text-white shadow-lg transition hover:bg-emerald-700 disabled:opacity-60"
+              className="group relative w-full overflow-hidden rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-4 py-3.5 text-sm font-black text-white shadow-lg shadow-purple-500/30 transition-all hover:scale-[1.02] hover:shadow-xl hover:shadow-fuchsia-500/40 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100"
             >
-              {carregando ? "Entrando..." : "Entrar"}
+              <span className="absolute inset-0 bg-gradient-to-r from-fuchsia-600 to-purple-600 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+              <span className="relative flex items-center justify-center gap-2">
+                {carregando ? (
+                  <>
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                    Entrando...
+                  </>
+                ) : (
+                  <>Entrar →</>
+                )}
+              </span>
             </button>
           </form>
-        </div>
 
-        <p className="animate-fade-in-bem-lento mt-6 text-center text-xs text-slate-500">
-          Sistema de Avaliação de Juvenis • Soul em Cristo
-        </p>
+          <p className="mt-4 text-center text-[10px] font-medium text-slate-500">
+            Soul em Cristo • Avaliação de Juvenis
+          </p>
+        </div>
       </div>
     </main>
   );
@@ -350,11 +412,12 @@ function LoginScreen() {
 /* ================================================================== */
 
 function TrocarSenhaScreen({ profile }: { profile: Profile }) {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [novaSenha, setNovaSenha] = useState("");
   const [confirmar, setConfirmar] = useState("");
   const [erro, setErro] = useState("");
   const [carregando, setCarregando] = useState(false);
+  const [mostrarSenha, setMostrarSenha] = useState(false);
 
   const primeiroNome = profile.nome.split(" ")[0];
   const erros = validarSenha(novaSenha, primeiroNome);
@@ -401,68 +464,106 @@ function TrocarSenhaScreen({ profile }: { profile: Profile }) {
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-950 p-4">
-      <div className="w-full max-w-lg">
-        <div className="animate-fade-in mb-6 flex justify-center">
-          <Image
-            src="/soul-em-cristo.png"
-            alt="Soul em Cristo"
-            width={280}
-            height={160}
-            className="h-auto w-full max-w-[200px] drop-shadow-2xl"
-          />
-        </div>
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-slate-950 p-4">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -top-32 left-1/2 h-72 w-72 -translate-x-1/2 animate-pulse rounded-full bg-purple-600/20 blur-3xl" />
+        <div
+          className="absolute -bottom-32 left-1/4 h-80 w-80 animate-pulse rounded-full bg-fuchsia-600/15 blur-3xl"
+          style={{ animationDelay: "1.5s" }}
+        />
+      </div>
 
-        <div className="animate-fade-in-lento rounded-2xl bg-slate-900 p-6 shadow-2xl ring-1 ring-slate-800">
-          <div className="mb-5 rounded-lg bg-amber-950/40 px-4 py-3 text-sm text-amber-200 ring-1 ring-amber-800">
-            ⚠️ <strong>Primeiro acesso.</strong> Você precisa criar uma senha
-            pessoal antes de continuar.
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.07]"
+        style={{
+          backgroundImage:
+            "radial-gradient(circle, white 1px, transparent 1px)",
+          backgroundSize: "24px 24px",
+        }}
+      />
+
+      <div className="relative z-10 w-full max-w-sm">
+        <div className="animate-fade-in-lento relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-b from-slate-900/90 to-slate-950/90 p-5 shadow-2xl backdrop-blur-xl">
+          <div className="absolute -top-px left-1/2 h-px w-3/4 -translate-x-1/2 bg-gradient-to-r from-transparent via-fuchsia-400 to-transparent" />
+
+          <div className="mb-3 flex justify-center">
+            <Image
+              src="/soul-em-cristo.png"
+              alt="Soul em Cristo"
+              width={120}
+              height={70}
+              className="h-auto w-full max-w-[110px] drop-shadow-lg"
+            />
           </div>
 
-          <h1 className="mb-1 text-xl font-bold text-slate-100">
-            Olá, {primeiroNome}!
-          </h1>
-          <p className="mb-5 text-sm text-slate-400">
-            Crie uma senha única e pessoal. Ninguém mais saberá ela.
-          </p>
+          <div className="mb-4 rounded-xl border border-purple-500/30 bg-purple-950/40 px-3 py-2.5 text-xs text-purple-200">
+            ✨ <strong>Primeiro acesso!</strong> Crie sua senha pessoal.
+          </div>
 
-          <form onSubmit={handleSalvar} className="space-y-4">
+          <div className="mb-4 text-center">
+            <h1 className="text-lg font-black tracking-tight text-white">
+              Ei, {primeiroNome}! 🎯
+            </h1>
+            <p className="mt-1 text-xs font-medium text-slate-400">
+              Crie uma senha única, só sua
+            </p>
+          </div>
+
+          <form onSubmit={handleSalvar} className="space-y-3">
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-300">
+              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-purple-300">
                 Nova senha
               </label>
-              <input
-                type="password"
-                value={novaSenha}
-                onChange={(e) => setNovaSenha(e.target.value)}
-                placeholder="Digite sua nova senha"
-                autoComplete="new-password"
-                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2.5 text-slate-100 outline-none transition focus:border-emerald-500"
-              />
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-base">
+                  🔐
+                </span>
+                <input
+                  type={mostrarSenha ? "text" : "password"}
+                  value={novaSenha}
+                  onChange={(e) => setNovaSenha(e.target.value)}
+                  placeholder="Digite sua nova senha"
+                  autoComplete="new-password"
+                  className="w-full rounded-xl border border-white/10 bg-white/5 py-3 pl-10 pr-11 text-sm text-slate-100 placeholder-slate-500 outline-none transition-all focus:border-purple-400 focus:bg-white/10 focus:ring-2 focus:ring-purple-500/30"
+                />
+                <button
+                  type="button"
+                  onClick={() => setMostrarSenha(!mostrarSenha)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-base opacity-60 transition hover:opacity-100"
+                  aria-label={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
+                >
+                  {mostrarSenha ? "🙈" : "👁️"}
+                </button>
+              </div>
             </div>
 
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-300">
-                Confirmar nova senha
+              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-fuchsia-300">
+                Confirmar senha
               </label>
-              <input
-                type="password"
-                value={confirmar}
-                onChange={(e) => setConfirmar(e.target.value)}
-                placeholder="Repita a senha"
-                autoComplete="new-password"
-                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2.5 text-slate-100 outline-none transition focus:border-emerald-500"
-              />
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-base">
+                  ✅
+                </span>
+                <input
+                  type={mostrarSenha ? "text" : "password"}
+                  value={confirmar}
+                  onChange={(e) => setConfirmar(e.target.value)}
+                  placeholder="Repita a senha"
+                  autoComplete="new-password"
+                  className="w-full rounded-xl border border-white/10 bg-white/5 py-3 pl-10 pr-3 text-sm text-slate-100 placeholder-slate-500 outline-none transition-all focus:border-fuchsia-400 focus:bg-white/10 focus:ring-2 focus:ring-fuchsia-500/30"
+                />
+              </div>
             </div>
 
-            <div className="rounded-lg bg-slate-800/60 p-3 ring-1 ring-slate-700">
-              <p className="mb-2 text-xs font-semibold text-slate-300">
-                Requisitos da senha:
+            <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+              <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-300">
+                🎯 Requisitos
               </p>
-              <ul className="space-y-1 text-xs">
+              <ul className="space-y-1 text-[11px]">
                 {[
                   { ok: novaSenha.length >= 8, txt: "Mínimo 8 caracteres" },
-                  { ok: /[A-Z]/.test(novaSenha), txt: "1 letra maiúscula" },
+                  { ok: /[A-Z]/.test(novaSenha), txt: "1 letra MAIÚSCULA" },
                   { ok: /[a-z]/.test(novaSenha), txt: "1 letra minúscula" },
                   { ok: /[0-9]/.test(novaSenha), txt: "1 número" },
                   {
@@ -475,12 +576,12 @@ function TrocarSenhaScreen({ profile }: { profile: Profile }) {
                       !novaSenha
                         .toLowerCase()
                         .includes(primeiroNome.toLowerCase()),
-                    txt: `Não pode conter seu nome (${primeiroNome})`,
+                    txt: `Não pode conter "${primeiroNome}"`,
                   },
                 ].map((r) => (
                   <li
                     key={r.txt}
-                    className={`flex items-center gap-2 ${
+                    className={`flex items-center gap-1.5 font-medium ${
                       r.ok ? "text-emerald-400" : "text-slate-500"
                     }`}
                   >
@@ -492,17 +593,28 @@ function TrocarSenhaScreen({ profile }: { profile: Profile }) {
             </div>
 
             {erro && (
-              <div className="rounded-lg bg-red-950/40 px-3 py-2 text-sm text-red-300 ring-1 ring-red-900">
-                {erro}
+              <div className="flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-950/40 px-3 py-2.5 text-xs font-medium text-red-300">
+                <span>⚠️</span>
+                <span>{erro}</span>
               </div>
             )}
 
             <button
               type="submit"
               disabled={carregando || !senhaValida || !senhasIguais}
-              className="w-full rounded-lg bg-emerald-600 px-4 py-2.5 font-semibold text-white shadow-lg transition hover:bg-emerald-700 disabled:opacity-40"
+              className="group relative w-full overflow-hidden rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-4 py-3.5 text-sm font-black text-white shadow-lg shadow-purple-500/30 transition-all hover:scale-[1.02] hover:shadow-xl hover:shadow-fuchsia-500/40 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100"
             >
-              {carregando ? "Salvando..." : "Salvar nova senha"}
+              <span className="absolute inset-0 bg-gradient-to-r from-fuchsia-600 to-purple-600 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+              <span className="relative flex items-center justify-center gap-2">
+                {carregando ? (
+                  <>
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                    Salvando...
+                  </>
+                ) : (
+                  <>Salvar senha →</>
+                )}
+              </span>
             </button>
           </form>
         </div>
@@ -561,7 +673,7 @@ function ModalNovoJuvenil({
   onFechar: () => void;
   onSalvo: () => void;
 }) {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [nome, setNome] = useState("");
   const [dia, setDia] = useState("");
   const [mes, setMes] = useState("");
@@ -577,14 +689,19 @@ function ModalNovoJuvenil({
       return;
     }
 
+    if (!dia || !mes) {
+      setErro("Informe o dia e o mês de aniversário.");
+      return;
+    }
+
     const diaNum = Number(dia);
     const mesNum = Number(mes);
 
-    if (dia && (diaNum < 1 || diaNum > 31)) {
+    if (!Number.isInteger(diaNum) || diaNum < 1 || diaNum > 31) {
       setErro("Dia do aniversário deve ser entre 1 e 31.");
       return;
     }
-    if (mes && (mesNum < 1 || mesNum > 12)) {
+    if (!Number.isInteger(mesNum) || mesNum < 1 || mesNum > 12) {
       setErro("Mês do aniversário deve ser entre 1 e 12.");
       return;
     }
@@ -593,8 +710,8 @@ function ModalNovoJuvenil({
 
     const { error } = await supabase.from("juvenis").insert({
       nome: nome.trim(),
-      aniversario_dia: dia ? diaNum : null,
-      aniversario_mes: mes ? mesNum : null,
+      aniversario_dia: diaNum,
+      aniversario_mes: mesNum,
       ativo: true,
     });
 
@@ -638,7 +755,7 @@ function ModalNovoJuvenil({
         <form onSubmit={handleSalvar} className="space-y-4">
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
-              Nome completo
+              Nome completo <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
@@ -646,13 +763,14 @@ function ModalNovoJuvenil({
               onChange={(e) => setNome(e.target.value)}
               placeholder="Ex: Maria Clara Santos"
               autoFocus
+              required
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-800 outline-none transition focus:border-emerald-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
             />
           </div>
 
           <div>
             <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">
-              Aniversário (opcional)
+              Aniversário <span className="text-red-500">*</span>
             </label>
             <div className="flex items-center gap-2">
               <input
@@ -662,6 +780,7 @@ function ModalNovoJuvenil({
                 value={dia}
                 onChange={(e) => setDia(e.target.value)}
                 placeholder="DD"
+                required
                 className="w-20 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-center text-slate-800 outline-none transition focus:border-emerald-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
               />
               <span className="text-slate-500">/</span>
@@ -672,6 +791,7 @@ function ModalNovoJuvenil({
                 value={mes}
                 onChange={(e) => setMes(e.target.value)}
                 placeholder="MM"
+                required
                 className="w-20 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-center text-slate-800 outline-none transition focus:border-emerald-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
               />
               <span className="text-xs text-slate-500">dia / mês</span>
@@ -707,7 +827,7 @@ function ModalNovoJuvenil({
 }
 
 /* ================================================================== */
-/*  MODAL: GERENCIAR JUVENIS                                          */
+/*  MODAL: GERENCIAR JUVENIS (COM EDIÇÃO + INATIVAR/REATIVAR)         */
 /* ================================================================== */
 
 function ModalGerenciarJuvenis({
@@ -719,8 +839,79 @@ function ModalGerenciarJuvenis({
   onFechar: () => void;
   onAtualizado: () => void;
 }) {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [processando, setProcessando] = useState<number | null>(null);
+
+  const [editandoId, setEditandoId] = useState<number | null>(null);
+  const [nomeEdicao, setNomeEdicao] = useState("");
+  const [diaEdicao, setDiaEdicao] = useState("");
+  const [mesEdicao, setMesEdicao] = useState("");
+  const [erroEdicao, setErroEdicao] = useState("");
+  const [salvandoEdicao, setSalvandoEdicao] = useState(false);
+
+  const iniciarEdicao = (j: Juvenil) => {
+    setEditandoId(j.id);
+    setNomeEdicao(j.nome);
+    setDiaEdicao(j.aniversario_dia ? String(j.aniversario_dia) : "");
+    setMesEdicao(j.aniversario_mes ? String(j.aniversario_mes) : "");
+    setErroEdicao("");
+  };
+
+  const cancelarEdicao = () => {
+    setEditandoId(null);
+    setNomeEdicao("");
+    setDiaEdicao("");
+    setMesEdicao("");
+    setErroEdicao("");
+  };
+
+  const salvarEdicao = async (juvenilId: number) => {
+    setErroEdicao("");
+
+    if (nomeEdicao.trim().length < 3) {
+      setErroEdicao("Digite o nome completo (mínimo 3 caracteres).");
+      return;
+    }
+
+    if (!diaEdicao || !mesEdicao) {
+      setErroEdicao("Informe o dia e o mês de aniversário.");
+      return;
+    }
+
+    const diaNum = Number(diaEdicao);
+    const mesNum = Number(mesEdicao);
+
+    if (!Number.isInteger(diaNum) || diaNum < 1 || diaNum > 31) {
+      setErroEdicao("O dia deve ser entre 1 e 31.");
+      return;
+    }
+
+    if (!Number.isInteger(mesNum) || mesNum < 1 || mesNum > 12) {
+      setErroEdicao("O mês deve ser entre 1 e 12.");
+      return;
+    }
+
+    setSalvandoEdicao(true);
+
+    const { error } = await supabase
+      .from("juvenis")
+      .update({
+        nome: nomeEdicao.trim(),
+        aniversario_dia: diaNum,
+        aniversario_mes: mesNum,
+      })
+      .eq("id", juvenilId);
+
+    setSalvandoEdicao(false);
+
+    if (error) {
+      setErroEdicao("Erro ao atualizar: " + error.message);
+      return;
+    }
+
+    cancelarEdicao();
+    onAtualizado();
+  };
 
   const alternarAtivo = async (j: Juvenil) => {
     const novoStatus = !j.ativo;
@@ -750,6 +941,143 @@ function ModalGerenciarJuvenis({
   const ativos = juvenis.filter((j) => j.ativo !== false);
   const inativos = juvenis.filter((j) => j.ativo === false);
 
+  const renderItemJuvenil = (j: Juvenil, inativo: boolean) => {
+    const estaEditando = editandoId === j.id;
+
+    if (estaEditando) {
+      return (
+        <li
+          key={j.id}
+          className="rounded-xl bg-slate-100 p-3 ring-2 ring-emerald-500 dark:bg-slate-800"
+        >
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                Nome completo *
+              </label>
+              <input
+                type="text"
+                value={nomeEdicao}
+                onChange={(e) => setNomeEdicao(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-800 outline-none focus:border-emerald-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300">
+                Aniversário (DD / MM) *
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="1"
+                  max="31"
+                  value={diaEdicao}
+                  onChange={(e) => setDiaEdicao(e.target.value)}
+                  placeholder="DD"
+                  className="w-16 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-center text-sm text-slate-800 outline-none focus:border-emerald-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                />
+                <span className="text-slate-500">/</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="12"
+                  value={mesEdicao}
+                  onChange={(e) => setMesEdicao(e.target.value)}
+                  placeholder="MM"
+                  className="w-16 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-center text-sm text-slate-800 outline-none focus:border-emerald-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                />
+              </div>
+            </div>
+
+            {erroEdicao && (
+              <p className="text-xs font-medium text-red-600 dark:text-red-400">
+                {erroEdicao}
+              </p>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={cancelarEdicao}
+                disabled={salvandoEdicao}
+                className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-200"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => salvarEdicao(j.id)}
+                disabled={salvandoEdicao}
+                className="rounded-md bg-emerald-600 px-3 py-1 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {salvandoEdicao ? "Salvando..." : "Salvar"}
+              </button>
+            </div>
+          </div>
+        </li>
+      );
+    }
+
+    return (
+      <li
+        key={j.id}
+        className={`flex items-center justify-between gap-2 rounded-lg px-3 py-2 ring-1 ring-slate-200 dark:ring-slate-700 ${
+          inativo
+            ? "bg-slate-100 opacity-80 dark:bg-slate-800/40"
+            : "bg-slate-50 dark:bg-slate-800/60"
+        }`}
+      >
+        <div className="min-w-0">
+          <p
+            className={`truncate text-sm font-medium ${
+              inativo
+                ? "text-slate-600 dark:text-slate-400"
+                : "text-slate-800 dark:text-slate-100"
+            }`}
+          >
+            {j.nome}
+          </p>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            🎂{" "}
+            {j.aniversario_dia && j.aniversario_mes
+              ? `${String(j.aniversario_dia).padStart(2, "0")}/${String(
+                  j.aniversario_mes
+                ).padStart(2, "0")}`
+              : "Sem aniversário cadastrado"}
+          </p>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            onClick={() => iniciarEdicao(j)}
+            className="rounded-md bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 transition hover:bg-blue-200 dark:bg-blue-950/50 dark:text-blue-300 dark:hover:bg-blue-900/60"
+          >
+            ✏️ Editar
+          </button>
+
+          {inativo ? (
+            <button
+              onClick={() => alternarAtivo(j)}
+              disabled={processando === j.id}
+              className="rounded-md bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-200 disabled:opacity-50 dark:bg-emerald-950/50 dark:text-emerald-300 dark:hover:bg-emerald-900/60"
+            >
+              {processando === j.id ? "..." : "Reativar"}
+            </button>
+          ) : (
+            <button
+              onClick={() => alternarAtivo(j)}
+              disabled={processando === j.id}
+              className="rounded-md bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-200 disabled:opacity-50 dark:bg-red-950/50 dark:text-red-300 dark:hover:bg-red-900/60"
+            >
+              {processando === j.id ? "..." : "Inativar"}
+            </button>
+          )}
+        </div>
+      </li>
+    );
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm"
@@ -765,7 +1093,7 @@ function ModalGerenciarJuvenis({
               ⚙️ Gerenciar Juvenis
             </h2>
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              Inative quem saiu da classe ou reative quem voltou
+              Edite dados, inative quem saiu da classe ou reative quem voltou
             </p>
           </div>
           <button
@@ -783,23 +1111,7 @@ function ModalGerenciarJuvenis({
               ✅ Ativos ({ativos.length})
             </h3>
             <ul className="space-y-2">
-              {ativos.map((j) => (
-                <li
-                  key={j.id}
-                  className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 ring-1 ring-slate-200 dark:bg-slate-800/60 dark:ring-slate-700"
-                >
-                  <span className="text-sm font-medium text-slate-800 dark:text-slate-100">
-                    {j.nome}
-                  </span>
-                  <button
-                    onClick={() => alternarAtivo(j)}
-                    disabled={processando === j.id}
-                    className="rounded-md bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-200 disabled:opacity-50 dark:bg-red-950/50 dark:text-red-300 dark:hover:bg-red-900/60"
-                  >
-                    {processando === j.id ? "..." : "Inativar"}
-                  </button>
-                </li>
-              ))}
+              {ativos.map((j) => renderItemJuvenil(j, false))}
             </ul>
           </section>
 
@@ -809,23 +1121,7 @@ function ModalGerenciarJuvenis({
                 💤 Inativos ({inativos.length})
               </h3>
               <ul className="space-y-2">
-                {inativos.map((j) => (
-                  <li
-                    key={j.id}
-                    className="flex items-center justify-between rounded-lg bg-slate-100 px-3 py-2 ring-1 ring-slate-200 opacity-80 dark:bg-slate-800/40 dark:ring-slate-700"
-                  >
-                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400">
-                      {j.nome}
-                    </span>
-                    <button
-                      onClick={() => alternarAtivo(j)}
-                      disabled={processando === j.id}
-                      className="rounded-md bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-200 disabled:opacity-50 dark:bg-emerald-950/50 dark:text-emerald-300 dark:hover:bg-emerald-900/60"
-                    >
-                      {processando === j.id ? "..." : "Reativar"}
-                    </button>
-                  </li>
-                ))}
+                {inativos.map((j) => renderItemJuvenil(j, true))}
               </ul>
             </section>
           )}
@@ -887,7 +1183,7 @@ function ModalAvisoInatividade({
 /* ================================================================== */
 
 export default function Home() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   const [carregandoAuth, setCarregandoAuth] = useState(true);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -904,25 +1200,64 @@ export default function Home() {
   const [modalNovoAberto, setModalNovoAberto] = useState(false);
   const [modalGerenciarAberto, setModalGerenciarAberto] = useState(false);
 
-  // Controle de inatividade
+  const [erroToast, setErroToast] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const exibirErro = useCallback((mensagem: string) => {
+    setErroToast(mensagem);
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+    toastTimeoutRef.current = setTimeout(() => {
+      setErroToast(null);
+    }, 6000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    };
+  }, []);
+
   const [mostrarAvisoInatividade, setMostrarAvisoInatividade] = useState(false);
+  const mostrarAvisoInatividadeRef = useRef(false);
   const [segundosRestantes, setSegundosRestantes] = useState(
     Math.floor(TEMPO_AVISO_MS / 1000)
   );
   const ultimaAtividade = useRef(Date.now());
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Refs para evitar conflitos de concorrência
   const avaliacoesRef = useRef<Record<number, AvaliacaoRow>>({});
+  const avaliacoesConfirmadasRef = useRef<Record<number, AvaliacaoRow>>({});
   const timeouts = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
   const camposPendentes = useRef<Record<number, Set<Criterio>>>({});
 
-  // Mantém avaliacoesRef sincronizado
   useEffect(() => {
     avaliacoesRef.current = avaliacoes;
   }, [avaliacoes]);
 
-  /* ----------------------- Auth ---------------------------- */
+  useEffect(() => {
+    mostrarAvisoInatividadeRef.current = mostrarAvisoInatividade;
+  }, [mostrarAvisoInatividade]);
+
+  const sincronizarLinhaEmTodasAvaliacoes = useCallback(
+    (novaLinha: AvaliacaoRow) => {
+      setTodasAvaliacoes((prev) => {
+        const index = prev.findIndex(
+          (a) =>
+            a.juvenil_id === novaLinha.juvenil_id &&
+            a.data_avaliacao === novaLinha.data_avaliacao
+        );
+        if (index >= 0) {
+          const copia = [...prev];
+          copia[index] = novaLinha;
+          return copia;
+        }
+        return [...prev, novaLinha];
+      });
+    },
+    []
+  );
 
   useEffect(() => {
     let ativo = true;
@@ -956,8 +1291,7 @@ export default function Home() {
       ativo = false;
       sub.subscription.unsubscribe();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [supabase]);
 
   useEffect(() => {
     if (!userId) return;
@@ -985,8 +1319,7 @@ export default function Home() {
     }
 
     carregarProfile();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
+  }, [userId, supabase]);
 
   const fazerLogout = async () => {
     if (!confirm("Deseja realmente sair?")) return;
@@ -995,15 +1328,16 @@ export default function Home() {
     setUserId(null);
   };
 
-  /* ----------------------- Auto-logout por inatividade ------------ */
-
   useEffect(() => {
     if (!profile || profile.must_change_password) return;
 
     const registrarAtividade = () => {
       ultimaAtividade.current = Date.now();
-      setMostrarAvisoInatividade(false);
-      setSegundosRestantes(Math.floor(TEMPO_AVISO_MS / 1000));
+      if (mostrarAvisoInatividadeRef.current) {
+        mostrarAvisoInatividadeRef.current = false;
+        setMostrarAvisoInatividade(false);
+        setSegundosRestantes(Math.floor(TEMPO_AVISO_MS / 1000));
+      }
     };
 
     const eventos = [
@@ -1028,13 +1362,16 @@ export default function Home() {
           setUserId(null);
         });
       } else if (inativo >= TEMPO_INATIVIDADE_MS - TEMPO_AVISO_MS) {
+        const restante = Math.max(
+          0,
+          Math.ceil((TEMPO_INATIVIDADE_MS - inativo) / 1000)
+        );
         setMostrarAvisoInatividade(true);
-        const restante = Math.floor((TEMPO_INATIVIDADE_MS - inativo) / 1000);
         setSegundosRestantes(restante);
-      } else {
+      } else if (mostrarAvisoInatividadeRef.current) {
         setMostrarAvisoInatividade(false);
       }
-    }, 10000);
+    }, 1000);
 
     return () => {
       eventos.forEach((evento) =>
@@ -1042,43 +1379,49 @@ export default function Home() {
       );
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile]);
+  }, [profile, supabase]);
 
-  /* ----------------------- Carregar dados ------------------------- */
-
-  const carregarJuvenis = async () => {
-    const { data } = await supabase
+  const carregarJuvenis = useCallback(async () => {
+    const { data, error } = await supabase
       .from("juvenis")
       .select("id, nome, aniversario_dia, aniversario_mes, ativo")
       .order("id");
+
+    if (error) {
+      console.error("Erro ao carregar juvenis:", error);
+      exibirErro("Erro ao carregar a lista de juvenis.");
+      return;
+    }
+
     setJuvenis(data ?? []);
-  };
+  }, [supabase, exibirErro]);
 
   useEffect(() => {
     if (!profile || profile.must_change_password) return;
     carregarJuvenis();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile]);
+  }, [profile, carregarJuvenis]);
 
   useEffect(() => {
     if (!profile || profile.must_change_password) return;
 
-    async function carregarRecentes() {
-      const seisMesesAtras = new Date();
-      seisMesesAtras.setMonth(seisMesesAtras.getMonth() - 6);
-      const dataCorte = seisMesesAtras.toISOString().slice(0, 10);
+    async function carregarDoAnoCorrente() {
+      const inicioAno = `${new Date().getFullYear()}-01-01`;
 
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("avaliacoes")
         .select("*")
-        .gte("data_avaliacao", dataCorte);
+        .gte("data_avaliacao", inicioAno);
+
+      if (error) {
+        console.error("Erro ao carregar histórico anual:", error);
+        return;
+      }
 
       setTodasAvaliacoes(data ?? []);
     }
-    carregarRecentes();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile]);
+
+    carregarDoAnoCorrente();
+  }, [profile, supabase]);
 
   useEffect(() => {
     if (!profile || profile.must_change_password) return;
@@ -1093,6 +1436,7 @@ export default function Home() {
 
       if (error) {
         console.error("Erro ao buscar avaliações:", error.message, error);
+        exibirErro("Erro ao carregar avaliações da data selecionada.");
         setCarregando(false);
         return;
       }
@@ -1101,38 +1445,27 @@ export default function Home() {
       (data ?? []).forEach((row: AvaliacaoRow) => {
         mapa[row.juvenil_id] = row;
       });
+
+      avaliacoesRef.current = { ...mapa };
+      avaliacoesConfirmadasRef.current = { ...mapa };
+
       setAvaliacoes(mapa);
       setCarregando(false);
     }
 
     carregarAvaliacoes();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dataSelecionada, profile]);
-
-  /* ----------------------- Lista de juvenis ativos --------------- */
+  }, [dataSelecionada, profile, supabase, exibirErro]);
 
   const juvenisAtivos = useMemo(
     () => juvenis.filter((j) => j.ativo !== false),
     [juvenis]
   );
 
-  /* ----------------------- Alternar critério ---------------------- */
-  /* NOVO: envia apenas o campo alterado — evita conflito entre usuários */
-
   const alternarCriterio = (juvenilId: number, criterio: Criterio) => {
-    const rowAtual = avaliacoes[juvenilId];
+    const rowAtual = avaliacoesRef.current[juvenilId];
 
     const base: AvaliacaoRow =
-      rowAtual ?? {
-        juvenil_id: juvenilId,
-        data_avaliacao: dataSelecionada,
-        presenca: false,
-        pontualidade: false,
-        participacao: false,
-        estudo_licao: false,
-        verso_aureo: false,
-        biblia: false,
-      };
+      rowAtual ?? criarAvaliacaoVazia(juvenilId, dataSelecionada);
 
     const isPresenca = criterio === "presenca";
     const temPresenca = base.presenca;
@@ -1144,7 +1477,6 @@ export default function Home() {
     const camposMudados: Criterio[] = [];
 
     if (isPresenca && statusAtual) {
-      // Desmarcar presença: zera TUDO (intencional)
       novaRow = {
         ...base,
         presenca: false,
@@ -1167,38 +1499,42 @@ export default function Home() {
       camposMudados.push(criterio);
     }
 
-    setAvaliacoes((prev) => ({ ...prev, [juvenilId]: novaRow }));
+    setAvaliacoes((prev) => {
+      const novo = { ...prev, [juvenilId]: novaRow };
+      avaliacoesRef.current = novo;
+      return novo;
+    });
+    sincronizarLinhaEmTodasAvaliacoes(novaRow);
 
-    // Acumula os campos que precisam ser salvos
     if (!camposPendentes.current[juvenilId]) {
       camposPendentes.current[juvenilId] = new Set();
     }
-    camposMudados.forEach((c) =>
-      camposPendentes.current[juvenilId].add(c)
-    );
+    camposMudados.forEach((c) => camposPendentes.current[juvenilId].add(c));
 
-    // Cancela timeout anterior e agenda novo
     if (timeouts.current[juvenilId]) {
       clearTimeout(timeouts.current[juvenilId]);
     }
+
+    const dataAlvo = dataSelecionada;
 
     timeouts.current[juvenilId] = setTimeout(async () => {
       const camposParaSalvar = camposPendentes.current[juvenilId];
       const rowFinal = avaliacoesRef.current[juvenilId];
 
+      delete camposPendentes.current[juvenilId];
+      delete timeouts.current[juvenilId];
+
       if (!camposParaSalvar || !rowFinal) return;
 
-      // Monta objeto apenas com os campos alterados
       const updateParcial: Record<string, boolean> = {};
       camposParaSalvar.forEach((c) => {
         updateParcial[c] = rowFinal[c];
       });
 
-      // PASSO 1: garante que a linha existe (sem sobrescrever nada)
-      await supabase.from("avaliacoes").upsert(
+      const { error: erroUpsert } = await supabase.from("avaliacoes").upsert(
         {
           juvenil_id: juvenilId,
-          data_avaliacao: dataSelecionada,
+          data_avaliacao: dataAlvo,
         },
         {
           onConflict: "data_avaliacao,juvenil_id",
@@ -1206,23 +1542,44 @@ export default function Home() {
         }
       );
 
-      // PASSO 2: atualiza APENAS os campos alterados
-      const { error } = await supabase
-        .from("avaliacoes")
-        .update(updateParcial)
-        .eq("juvenil_id", juvenilId)
-        .eq("data_avaliacao", dataSelecionada);
+      const { error: erroUpdate } = erroUpsert
+        ? { error: erroUpsert }
+        : await supabase
+            .from("avaliacoes")
+            .update(updateParcial)
+            .eq("juvenil_id", juvenilId)
+            .eq("data_avaliacao", dataAlvo);
 
-      if (error) {
-        console.error("Erro ao salvar avaliação:", error.message, error);
+      if (erroUpsert || erroUpdate) {
+        const erroReal = erroUpsert || erroUpdate;
+        console.error(
+          "Erro ao salvar avaliação:",
+          erroReal?.message,
+          erroReal
+        );
+
+        const estadoAnterior =
+          avaliacoesConfirmadasRef.current[juvenilId] ??
+          criarAvaliacaoVazia(juvenilId, dataAlvo);
+
+        setAvaliacoes((prev) => {
+          const novo = { ...prev, [juvenilId]: estadoAnterior };
+          avaliacoesRef.current = novo;
+          return novo;
+        });
+        sincronizarLinhaEmTodasAvaliacoes(estadoAnterior);
+
+        const nomeJuvenil =
+          juvenis.find((j) => j.id === juvenilId)?.nome ?? "juvenil";
+        exibirErro(
+          `Falha ao salvar alteração de ${nomeJuvenil}. Os dados foram revertidos.`
+        );
+        return;
       }
 
-      delete camposPendentes.current[juvenilId];
-      delete timeouts.current[juvenilId];
+      avaliacoesConfirmadasRef.current[juvenilId] = { ...rowFinal };
     }, 600);
   };
-
-  /* ----------------------- Alternar todos presentes --------------- */
 
   const todosPresentes = useMemo(() => {
     if (juvenisAtivos.length === 0) return false;
@@ -1237,24 +1594,19 @@ export default function Home() {
     if (!confirmar) return;
 
     const ids = juvenisAtivos.map((j) => j.id);
-
     if (ids.length === 0) return;
 
-    // Atualiza estado local otimista
-    const novoMapa: Record<number, AvaliacaoRow> = { ...avaliacoes };
+    const snapshotAvaliacoes = { ...avaliacoesRef.current };
+    const snapshotTodasAvaliacoes = [...todasAvaliacoes];
+
+    const novoMapa: Record<number, AvaliacaoRow> = { ...avaliacoesRef.current };
     juvenisAtivos.forEach((j) => {
-      const anterior = avaliacoes[j.id];
+      const anterior =
+        avaliacoesRef.current[j.id] ??
+        criarAvaliacaoVazia(j.id, dataSelecionada);
       if (todosPresentes) {
         novoMapa[j.id] = {
-          ...(anterior ?? {
-            juvenil_id: j.id,
-            data_avaliacao: dataSelecionada,
-            pontualidade: false,
-            participacao: false,
-            estudo_licao: false,
-            verso_aureo: false,
-            biblia: false,
-          }),
+          ...anterior,
           juvenil_id: j.id,
           data_avaliacao: dataSelecionada,
           presenca: false,
@@ -1266,25 +1618,25 @@ export default function Home() {
         };
       } else {
         novoMapa[j.id] = {
-          ...(anterior ?? {
-            juvenil_id: j.id,
-            data_avaliacao: dataSelecionada,
-            pontualidade: false,
-            participacao: false,
-            estudo_licao: false,
-            verso_aureo: false,
-            biblia: false,
-          }),
+          ...anterior,
           juvenil_id: j.id,
           data_avaliacao: dataSelecionada,
           presenca: true,
         };
       }
     });
-    setAvaliacoes(novoMapa);
 
-    // PASSO 1: garante que todas as linhas existem
-    await supabase.from("avaliacoes").upsert(
+    avaliacoesRef.current = novoMapa;
+
+    setAvaliacoes(novoMapa);
+    setTodasAvaliacoes((prev) => {
+      const filtradas = prev.filter(
+        (a) => a.data_avaliacao !== dataSelecionada
+      );
+      return [...filtradas, ...Object.values(novoMapa)];
+    });
+
+    const { error: erroUpsert } = await supabase.from("avaliacoes").upsert(
       juvenisAtivos.map((j) => ({
         juvenil_id: j.id,
         data_avaliacao: dataSelecionada,
@@ -1295,37 +1647,49 @@ export default function Home() {
       }
     );
 
-    // PASSO 2: atualiza apenas as colunas apropriadas
-    if (todosPresentes) {
-      const { error } = await supabase
-        .from("avaliacoes")
-        .update({
+    if (erroUpsert) {
+      console.error("Erro no upsert em massa:", erroUpsert.message, erroUpsert);
+      avaliacoesRef.current = snapshotAvaliacoes;
+      setAvaliacoes(snapshotAvaliacoes);
+      setTodasAvaliacoes(snapshotTodasAvaliacoes);
+      exibirErro(
+        "Não foi possível atualizar a presença de todos. Verifique sua conexão."
+      );
+      return;
+    }
+
+    const payloadUpdate = todosPresentes
+      ? {
           presenca: false,
           pontualidade: false,
           participacao: false,
           estudo_licao: false,
           verso_aureo: false,
           biblia: false,
-        })
-        .eq("data_avaliacao", dataSelecionada)
-        .in("juvenil_id", ids);
+        }
+      : { presenca: true };
 
-      if (error) {
-        console.error("Erro ao desmarcar todos:", error.message, error);
-      }
-    } else {
-      const { error } = await supabase
-        .from("avaliacoes")
-        .update({ presenca: true })
-        .eq("data_avaliacao", dataSelecionada)
-        .in("juvenil_id", ids);
+    const { error: erroUpdate } = await supabase
+      .from("avaliacoes")
+      .update(payloadUpdate)
+      .eq("data_avaliacao", dataSelecionada)
+      .in("juvenil_id", ids);
 
-      if (error) {
-        console.error("Erro ao marcar todos:", error.message, error);
-      }
+    if (erroUpdate) {
+      console.error(
+        "Erro ao atualizar todos:",
+        erroUpdate.message,
+        erroUpdate
+      );
+      avaliacoesRef.current = snapshotAvaliacoes;
+      setAvaliacoes(snapshotAvaliacoes);
+      setTodasAvaliacoes(snapshotTodasAvaliacoes);
+      exibirErro(
+        "Erro ao salvar presença em massa no banco. Alteração revertida."
+      );
+      return;
     }
 
-    // Recarrega do banco para pegar o estado real
     const { data } = await supabase
       .from("avaliacoes")
       .select("*")
@@ -1335,6 +1699,10 @@ export default function Home() {
     (data ?? []).forEach((row: AvaliacaoRow) => {
       mapa[row.juvenil_id] = row;
     });
+
+    avaliacoesRef.current = mapa;
+    avaliacoesConfirmadasRef.current = { ...mapa };
+
     setAvaliacoes(mapa);
 
     setTodasAvaliacoes((prev) => {
@@ -1345,23 +1713,21 @@ export default function Home() {
     });
   };
 
-  /* ----------------------- Cálculo de total ---------------------- */
-
-  const calcularTotal = (juvenilId: number): number => {
-    const row = avaliacoes[juvenilId];
-    if (!row) return 0;
-    return calcularTotalLinha(row);
-  };
-
-  /* ----------------------- Derivados ----------------------------- */
+  const calcularTotal = useCallback(
+    (juvenilId: number): number => {
+      const row = avaliacoes[juvenilId];
+      if (!row) return 0;
+      return calcularTotalLinha(row);
+    },
+    [avaliacoes]
+  );
 
   const ranking = useMemo(() => {
     return juvenisAtivos
       .map((j) => ({ ...j, total: calcularTotal(j.id) }))
       .filter((j) => j.total > 0)
       .sort((a, b) => b.total - a.total);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [avaliacoes, juvenisAtivos]);
+  }, [juvenisAtivos, calcularTotal]);
 
   const presentes = useMemo(
     () => juvenisAtivos.filter((j) => avaliacoes[j.id]?.presenca).length,
@@ -1450,8 +1816,6 @@ export default function Home() {
     return calcularMedalhas(historicoJuvenil);
   }, [juvenilAberto, historicoJuvenil]);
 
-  /* ----------------------- Dark mode ----------------------------- */
-
   useEffect(() => {
     const estaEscuro = document.documentElement.classList.contains("dark");
     setDark(estaEscuro);
@@ -1470,8 +1834,6 @@ export default function Home() {
     setDark(novo);
   };
 
-  /* ----------------------- Renderização condicional -------------- */
-
   if (carregandoAuth) return <SkeletonScreen />;
   if (!userId) return <LoginScreen />;
   if (!profile) return <SkeletonScreen />;
@@ -1479,10 +1841,21 @@ export default function Home() {
     return <TrocarSenhaScreen profile={profile} />;
   if (carregando && juvenis.length === 0) return <SkeletonScreen />;
 
-  /* ----------------------- UI principal -------------------------- */
-
   return (
     <main className="min-h-screen bg-slate-50 p-4 transition-colors dark:bg-slate-950 dark:text-slate-100 sm:p-8">
+      {erroToast && (
+        <div className="fixed bottom-4 right-4 z-[90] flex max-w-md items-center gap-3 rounded-xl bg-red-600 px-4 py-3 text-sm font-medium text-white shadow-2xl ring-1 ring-red-400">
+          <span>⚠️ {erroToast}</span>
+          <button
+            onClick={() => setErroToast(null)}
+            className="rounded p-1 text-white/80 transition hover:bg-red-700 hover:text-white"
+            aria-label="Fechar aviso"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <div className="mx-auto max-w-6xl">
         <header className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -1855,7 +2228,6 @@ export default function Home() {
         )}
       </div>
 
-      {/* MODAL DE HISTÓRICO */}
       {juvenilAberto && (
         <div
           className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm"
@@ -1870,13 +2242,14 @@ export default function Home() {
                 <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">
                   {juvenilAberto.nome}
                 </h2>
-                {juvenilAberto.aniversario_dia && juvenilAberto.aniversario_mes && (
-                  <p className="text-sm text-slate-500 dark:text-slate-400">
-                    🎂 Aniversário:{" "}
-                    {String(juvenilAberto.aniversario_dia).padStart(2, "0")}/
-                    {String(juvenilAberto.aniversario_mes).padStart(2, "0")}
-                  </p>
-                )}
+                {juvenilAberto.aniversario_dia &&
+                  juvenilAberto.aniversario_mes && (
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      🎂 Aniversário:{" "}
+                      {String(juvenilAberto.aniversario_dia).padStart(2, "0")}/
+                      {String(juvenilAberto.aniversario_mes).padStart(2, "0")}
+                    </p>
+                  )}
               </div>
               <button
                 onClick={() => setJuvenilAberto(null)}
@@ -2017,7 +2390,7 @@ export default function Home() {
 
                   <section>
                     <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                      📅 Histórico completo
+                      📅 Histórico do ano
                     </h3>
                     <div className="overflow-x-auto rounded-xl ring-1 ring-slate-200 dark:ring-slate-700">
                       <table className="w-full min-w-[500px] border-collapse text-sm">
@@ -2077,7 +2450,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* MODAL: NOVO JUVENIL */}
       {modalNovoAberto && (
         <ModalNovoJuvenil
           onFechar={() => setModalNovoAberto(false)}
@@ -2088,7 +2460,6 @@ export default function Home() {
         />
       )}
 
-      {/* MODAL: GERENCIAR */}
       {modalGerenciarAberto && (
         <ModalGerenciarJuvenis
           juvenis={juvenis}
@@ -2097,12 +2468,12 @@ export default function Home() {
         />
       )}
 
-      {/* MODAL: AVISO DE INATIVIDADE */}
       {mostrarAvisoInatividade && (
         <ModalAvisoInatividade
           segundos={segundosRestantes}
           onContinuar={() => {
             ultimaAtividade.current = Date.now();
+            mostrarAvisoInatividadeRef.current = false;
             setMostrarAvisoInatividade(false);
             setSegundosRestantes(Math.floor(TEMPO_AVISO_MS / 1000));
           }}
