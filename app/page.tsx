@@ -4,10 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase";
+import { resolverEmail, validarSenhaAmigavel } from "@/lib/auth-helpers";
+import { SecaoVisitantes } from "@/components/SecaoVisitantes";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 
-const TEMPO_INATIVIDADE_MS = 5 * 60 * 1000;
-const TEMPO_AVISO_MS = 1 * 60 * 1000;
+const TEMPO_INATIVIDADE_MS = 30 * 60 * 1000; // 30 minutos (evita logout precoce durante a aula)
+const TEMPO_AVISO_MS = 2 * 60 * 1000; // 2 minutos de aviso prévio
 
 type Juvenil = {
   id: number;
@@ -139,18 +141,6 @@ function calcularTotalLinha(row: AvaliacaoRow): number {
   }, 0);
 }
 
-function validarSenha(senha: string, nomeUsuario: string) {
-  const erros: string[] = [];
-  if (senha.length < 8) erros.push("Mínimo de 8 caracteres");
-  if (!/[A-Z]/.test(senha)) erros.push("Pelo menos 1 letra MAIÚSCULA");
-  if (!/[a-z]/.test(senha)) erros.push("Pelo menos 1 letra minúscula");
-  if (!/[0-9]/.test(senha)) erros.push("Pelo menos 1 número");
-  if (!/[^A-Za-z0-9]/.test(senha)) erros.push("Pelo menos 1 caractere especial");
-  if (nomeUsuario && senha.toLowerCase().includes(nomeUsuario.toLowerCase()))
-    erros.push("Não pode conter seu nome");
-  return erros;
-}
-
 type Medalha = { emoji: string; nome: string; descricao: string };
 
 function calcularMedalhas(avaliacoes: AvaliacaoRow[]): Medalha[] {
@@ -181,6 +171,149 @@ function calcularMedalhas(avaliacoes: AvaliacaoRow[]): Medalha[] {
 }
 
 /* ================================================================== */
+/*  MODAL: ESQUECI MINHA SENHA                                        */
+/* ================================================================== */
+
+function ModalEsqueciSenha({ onFechar }: { onFechar: () => void }) {
+  const supabase = useMemo(() => createClient(), []);
+  const [identificador, setIdentificador] = useState("");
+  const [carregando, setCarregando] = useState(false);
+  const [erro, setErro] = useState("");
+  const [emailEnviado, setEmailEnviado] = useState<string | null>(null);
+
+  const handleEnviar = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErro("");
+    const valor = identificador.trim();
+    if (!valor) {
+      setErro("Informe seu usuário ou e-mail cadastrado.");
+      return;
+    }
+
+    setCarregando(true);
+    const emailFinal = resolverEmail(valor);
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(emailFinal, {
+        redirectTo: `${window.location.origin}/redefinir-senha`,
+      });
+
+      if (error) {
+        setErro("Não foi possível enviar o link: " + error.message);
+        setCarregando(false);
+        return;
+      }
+
+      setEmailEnviado(emailFinal);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setErro("Erro ao processar solicitação: " + msg);
+    } finally {
+      setCarregando(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/75 p-4 backdrop-blur-sm"
+      onClick={onFechar}
+    >
+      <div
+        className="w-full max-w-sm rounded-3xl border border-white/10 bg-gradient-to-b from-slate-900 to-slate-950 p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-start justify-between">
+          <div>
+            <h2 className="bg-gradient-to-r from-purple-200 to-fuchsia-300 bg-clip-text text-lg font-black text-transparent">
+              🔑 Recuperar Senha
+            </h2>
+            <p className="text-xs text-slate-400">Restabeleça seu acesso em 1 minuto</p>
+          </div>
+          <button
+            onClick={onFechar}
+            className="rounded-lg p-1 text-slate-400 transition hover:bg-white/10 hover:text-slate-100"
+            aria-label="Fechar"
+          >
+            ✕
+          </button>
+        </div>
+
+        {emailEnviado ? (
+          <div className="space-y-4 py-2 text-center">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-950/50 border border-purple-500/30 text-2xl">
+              📬
+            </div>
+            <div>
+              <p className="text-sm font-bold text-white">Link enviado com sucesso!</p>
+              <p className="mt-1 text-xs text-slate-300">
+                Enviamos as instruções de redefinição para:
+              </p>
+              <p className="mt-1.5 font-mono text-xs font-semibold text-fuchsia-300 break-all bg-white/5 py-1.5 px-2.5 rounded-lg border border-white/5">
+                {emailEnviado}
+              </p>
+            </div>
+            <div className="rounded-xl border border-purple-500/20 bg-purple-950/30 p-3 text-left text-[11px] text-slate-300 space-y-1">
+              <p>• Abra seu e-mail e clique no link de recuperação.</p>
+              <p>• Verifique também sua pasta de <strong>Spam / Lixo Eletrônico</strong>.</p>
+              <p>• O link expira em poucos minutos por segurança.</p>
+            </div>
+            <button
+              onClick={onFechar}
+              className="w-full rounded-2xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-purple-500/30 transition hover:shadow-xl"
+            >
+              Entendido, voltar ao login
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={handleEnviar} className="space-y-3.5">
+            <div>
+              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-purple-300">
+                Seu Usuário ou E-mail
+              </label>
+              <input
+                type="text"
+                value={identificador}
+                onChange={(e) => setIdentificador(e.target.value)}
+                placeholder="Ex: tobias ou tobias.feitosa@gmail.com"
+                autoFocus
+                required
+                className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-purple-400 focus:bg-white/10 focus:ring-2 focus:ring-purple-500/30"
+              />
+              <p className="mt-1.5 text-[11px] text-slate-400">
+                Enviaremos um link de acesso imediato para o e-mail cadastrado.
+              </p>
+            </div>
+
+            {erro && (
+              <div className="rounded-xl border border-red-500/30 bg-red-950/40 px-3 py-2 text-xs font-medium text-red-300">
+                ⚠️ {erro}
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={onFechar}
+                className="flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs font-medium text-slate-300 transition hover:bg-white/10"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={carregando}
+                className="flex-1 rounded-xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-3 py-2.5 text-xs font-bold text-white shadow-lg shadow-purple-500/30 transition hover:shadow-xl disabled:opacity-60"
+              >
+                {carregando ? "Enviando..." : "Enviar link →"}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================== */
 /*  LOGIN                                                             */
 /* ================================================================== */
 
@@ -191,14 +324,13 @@ function LoginScreen() {
   const [erro, setErro] = useState("");
   const [carregando, setCarregando] = useState(false);
   const [mostrarSenha, setMostrarSenha] = useState(false);
+  const [modalEsqueciAberto, setModalEsqueciAberto] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErro("");
     setCarregando(true);
-    const emailCompleto = usuario.includes("@")
-      ? usuario.trim()
-      : `${usuario.trim().toLowerCase()}@soul.local`;
+    const emailCompleto = resolverEmail(usuario);
     const { error } = await supabase.auth.signInWithPassword({
       email: emailCompleto,
       password: senha,
@@ -237,7 +369,16 @@ function LoginScreen() {
               </div>
             </div>
             <div>
-              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-fuchsia-300">Senha</label>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-fuchsia-300">Senha</label>
+                <button
+                  type="button"
+                  onClick={() => setModalEsqueciAberto(true)}
+                  className="text-[10px] font-semibold text-purple-300 hover:text-purple-200 transition hover:underline"
+                >
+                  Esqueceu a senha?
+                </button>
+              </div>
               <div className="relative">
                 <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-base">🔒</span>
                 <input type={mostrarSenha ? "text" : "password"} value={senha} onChange={(e) => setSenha(e.target.value)} placeholder="Digite sua senha" autoComplete="current-password" required className="w-full rounded-xl border border-white/10 bg-white/5 py-3 pl-10 pr-11 text-sm text-slate-100 placeholder-slate-500 outline-none transition-all focus:border-fuchsia-400 focus:bg-white/10 focus:ring-2 focus:ring-fuchsia-500/30" />
@@ -261,6 +402,9 @@ function LoginScreen() {
           <p className="mt-4 text-center text-[10px] font-medium text-slate-500">Soul em Cristo • Avaliação de Juvenis</p>
         </div>
       </div>
+      {modalEsqueciAberto && (
+        <ModalEsqueciSenha onFechar={() => setModalEsqueciAberto(false)} />
+      )}
     </main>
   );
 }
@@ -269,7 +413,13 @@ function LoginScreen() {
 /*  TROCA DE SENHA                                                    */
 /* ================================================================== */
 
-function TrocarSenhaScreen({ profile }: { profile: Profile }) {
+function TrocarSenhaScreen({
+  profile,
+  onSenhaAlterada,
+}: {
+  profile: Profile;
+  onSenhaAlterada?: () => void;
+}) {
   const supabase = useMemo(() => createClient(), []);
   const [novaSenha, setNovaSenha] = useState("");
   const [confirmar, setConfirmar] = useState("");
@@ -278,9 +428,10 @@ function TrocarSenhaScreen({ profile }: { profile: Profile }) {
   const [mostrarSenha, setMostrarSenha] = useState(false);
 
   const primeiroNome = profile.nome.split(" ")[0];
-  const erros = validarSenha(novaSenha, primeiroNome);
+  const erros = validarSenhaAmigavel(novaSenha, primeiroNome);
   const senhaValida = novaSenha.length > 0 && erros.length === 0;
   const senhasIguais = novaSenha === confirmar && confirmar.length > 0;
+  const ehFraseLonga = novaSenha.length >= 12;
 
   const handleSalvar = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -292,7 +443,11 @@ function TrocarSenhaScreen({ profile }: { profile: Profile }) {
     if (errorAuth) { setErro("Erro ao salvar: " + errorAuth.message); setCarregando(false); return; }
     const { error: errorProfile } = await supabase.from("profiles").update({ must_change_password: false }).eq("id", profile.id);
     if (errorProfile) { setErro("Erro ao atualizar perfil: " + errorProfile.message); setCarregando(false); return; }
-    window.location.reload();
+    if (onSenhaAlterada) {
+      onSenhaAlterada();
+    } else {
+      window.location.reload();
+    }
   };
 
   return (
@@ -335,20 +490,28 @@ function TrocarSenhaScreen({ profile }: { profile: Profile }) {
               </div>
             </div>
             <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-              <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-300">🎯 Requisitos</p>
+              <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-300">💡 Dica de Senha Amigável</p>
               <ul className="space-y-1 text-[11px]">
-                {[
-                  { ok: novaSenha.length >= 8, txt: "Mínimo 8 caracteres" },
-                  { ok: /[A-Z]/.test(novaSenha), txt: "1 letra MAIÚSCULA" },
-                  { ok: /[a-z]/.test(novaSenha), txt: "1 letra minúscula" },
-                  { ok: /[0-9]/.test(novaSenha), txt: "1 número" },
-                  { ok: /[^A-Za-z0-9]/.test(novaSenha), txt: "1 caractere especial (@, #, $, ...)" },
-                  { ok: novaSenha.length > 0 && !novaSenha.toLowerCase().includes(primeiroNome.toLowerCase()), txt: `Não pode conter "${primeiroNome}"` },
-                ].map((r) => (
-                  <li key={r.txt} className={`flex items-center gap-1.5 font-medium ${r.ok ? "text-emerald-400" : "text-slate-500"}`}>
-                    <span>{r.ok ? "✓" : "○"}</span><span>{r.txt}</span>
+                <li className={`flex items-center gap-1.5 font-medium ${novaSenha.length >= 8 ? "text-emerald-400" : "text-slate-500"}`}>
+                  <span>{novaSenha.length >= 8 ? "✓" : "○"}</span>
+                  <span>Mínimo de 8 caracteres</span>
+                </li>
+                <li className={`flex items-center gap-1.5 font-medium ${ehFraseLonga || (/[A-Za-z]/.test(novaSenha) && /[0-9]/.test(novaSenha)) ? "text-emerald-400" : "text-slate-500"}`}>
+                  <span>{ehFraseLonga || (/[A-Za-z]/.test(novaSenha) && /[0-9]/.test(novaSenha)) ? "✓" : "○"}</span>
+                  <span>{ehFraseLonga ? "✨ Frase-senha longa (12+ caracteres) aprovada!" : "Pelo menos 1 letra e 1 número (ou frase de 12+ caracteres)"}</span>
+                </li>
+                {primeiroNome && (
+                  <li className={`flex items-center gap-1.5 font-medium ${novaSenha.length > 0 && !novaSenha.toLowerCase().includes(primeiroNome.toLowerCase()) ? "text-emerald-400" : "text-slate-500"}`}>
+                    <span>{novaSenha.length > 0 && !novaSenha.toLowerCase().includes(primeiroNome.toLowerCase()) ? "✓" : "○"}</span>
+                    <span>Não pode conter seu nome ("{primeiroNome}")</span>
                   </li>
-                ))}
+                )}
+                {confirmar.length > 0 && (
+                  <li className={`flex items-center gap-1.5 font-medium ${senhasIguais ? "text-emerald-400" : "text-red-400"}`}>
+                    <span>{senhasIguais ? "✓" : "✕"}</span>
+                    <span>{senhasIguais ? "Senhas coincidem" : "Senhas diferentes"}</span>
+                  </li>
+                )}
               </ul>
             </div>
             {erro && (
@@ -623,10 +786,12 @@ export default function Home() {
   const [userId, setUserId] = useState<string | null>(null);
   const [juvenis, setJuvenis] = useState<Juvenil[]>([]);
   const [avaliacoes, setAvaliacoes] = useState<Record<number, AvaliacaoRow>>({});
-  const [todasAvaliacoes, setTodasAvaliacoes] = useState<AvaliacaoRow[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [dataSelecionada, setDataSelecionada] = useState<string>(hojeISO());
   const [juvenilAberto, setJuvenilAberto] = useState<Juvenil | null>(null);
+  const [historicoJuvenil, setHistoricoJuvenil] = useState<AvaliacaoRow[]>([]);
+  const [carregandoHistorico, setCarregandoHistorico] = useState(false);
+  const [liderTrimestre, setLiderTrimestre] = useState<{ nome: string; total: number } | null>(null);
   const [modalNovoAberto, setModalNovoAberto] = useState(false);
   const [modalGerenciarAberto, setModalGerenciarAberto] = useState(false);
 
@@ -638,6 +803,21 @@ export default function Home() {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     toastTimeoutRef.current = setTimeout(() => setErroToast(null), 6000);
   }, []);
+
+  const abrirDetalhesJuvenil = useCallback(async (j: Juvenil) => {
+    setJuvenilAberto(j);
+    setCarregandoHistorico(true);
+    const inicioAno = `${new Date().getFullYear()}-01-01`;
+    const { data } = await supabase
+      .from("avaliacoes")
+      .select("*")
+      .eq("juvenil_id", j.id)
+      .gte("data_avaliacao", inicioAno)
+      .order("data_avaliacao", { ascending: true });
+
+    setHistoricoJuvenil(data ?? []);
+    setCarregandoHistorico(false);
+  }, [supabase]);
 
   useEffect(() => {
     return () => { if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current); };
@@ -656,14 +836,6 @@ export default function Home() {
 
   useEffect(() => { avaliacoesRef.current = avaliacoes; }, [avaliacoes]);
   useEffect(() => { mostrarAvisoInatividadeRef.current = mostrarAvisoInatividade; }, [mostrarAvisoInatividade]);
-
-  const sincronizarLinhaEmTodasAvaliacoes = useCallback((novaLinha: AvaliacaoRow) => {
-    setTodasAvaliacoes((prev) => {
-      const index = prev.findIndex((a) => a.juvenil_id === novaLinha.juvenil_id && a.data_avaliacao === novaLinha.data_avaliacao);
-      if (index >= 0) { const copia = [...prev]; copia[index] = novaLinha; return copia; }
-      return [...prev, novaLinha];
-    });
-  }, []);
 
   useEffect(() => {
     let ativo = true;
@@ -702,6 +874,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!profile || profile.must_change_password) return;
+    ultimaAtividade.current = Date.now(); // Reinicia o contador no momento do login!
     const registrarAtividade = () => {
       ultimaAtividade.current = Date.now();
       if (mostrarAvisoInatividadeRef.current) {
@@ -742,15 +915,46 @@ export default function Home() {
   }, [profile, carregarJuvenis]);
 
   useEffect(() => {
-    if (!profile || profile.must_change_password) return;
-    async function carregarDoAnoCorrente() {
-      const inicioAno = `${new Date().getFullYear()}-01-01`;
-      const { data, error } = await supabase.from("avaliacoes").select("*").gte("data_avaliacao", inicioAno);
-      if (error) { console.error("Erro ao carregar histórico anual:", error); return; }
-      setTodasAvaliacoes(data ?? []);
+    if (!profile || profile.must_change_password || juvenis.length === 0) return;
+    async function carregarLider() {
+      const tri = trimestreAtual();
+      const meses = TRIMESTRES[tri].meses;
+      const ano = new Date().getFullYear();
+      const mesInicio = String(meses[0]).padStart(2, "0");
+      const mesFim = String(meses[meses.length - 1]).padStart(2, "0");
+      const dataInicio = `${ano}-${mesInicio}-01`;
+      const dataFim = `${ano}-${mesFim}-31`;
+
+      const { data, error } = await supabase
+        .from("avaliacoes")
+        .select("juvenil_id, presenca, pontualidade, participacao, estudo_licao, verso_aureo, biblia")
+        .gte("data_avaliacao", dataInicio)
+        .lte("data_avaliacao", dataFim);
+
+      if (error || !data || data.length === 0) return;
+
+      const somas: Record<number, number> = {};
+      (data as any[]).forEach((a) => {
+        const tot = calcularTotalLinha(a as AvaliacaoRow);
+        somas[a.juvenil_id] = (somas[a.juvenil_id] ?? 0) + tot;
+      });
+
+      let melhorId: number | null = null;
+      let melhorTotal = 0;
+      Object.entries(somas).forEach(([idStr, total]) => {
+        if (total > melhorTotal) {
+          melhorTotal = total;
+          melhorId = Number(idStr);
+        }
+      });
+
+      if (melhorId) {
+        const j = juvenis.find((x) => x.id === melhorId);
+        if (j) setLiderTrimestre({ nome: j.nome, total: melhorTotal });
+      }
     }
-    carregarDoAnoCorrente();
-  }, [profile, supabase]);
+    carregarLider();
+  }, [profile, juvenis, supabase]);
 
   useEffect(() => {
     if (!profile || profile.must_change_password) return;
@@ -776,21 +980,24 @@ export default function Home() {
     const isPresenca = criterio === "presenca";
     const temPresenca = base.presenca;
     const statusAtual = base[criterio];
-    if (!isPresenca && !temPresenca) return;
 
     let novaRow: AvaliacaoRow;
     const camposMudados: Criterio[] = [];
 
     if (isPresenca && statusAtual) {
+      // Desmarcando presença: desmarca todos os critérios
       novaRow = { ...base, presenca: false, pontualidade: false, participacao: false, estudo_licao: false, verso_aureo: false, biblia: false };
       camposMudados.push("presenca", "pontualidade", "participacao", "estudo_licao", "verso_aureo", "biblia");
+    } else if (!isPresenca && !temPresenca) {
+      // Regra automática: Quem trouxe Bíblia, Lição ou pontuou, estava PRESENTE!
+      novaRow = { ...base, presenca: true, [criterio]: true };
+      camposMudados.push("presenca", criterio);
     } else {
       novaRow = { ...base, [criterio]: !statusAtual };
       camposMudados.push(criterio);
     }
 
     setAvaliacoes((prev) => { const novo = { ...prev, [juvenilId]: novaRow }; avaliacoesRef.current = novo; return novo; });
-    sincronizarLinhaEmTodasAvaliacoes(novaRow);
 
     if (!camposPendentes.current[juvenilId]) camposPendentes.current[juvenilId] = new Set();
     camposMudados.forEach((c) => camposPendentes.current[juvenilId].add(c));
@@ -812,7 +1019,6 @@ export default function Home() {
         console.error("Erro ao salvar avaliação:", erroReal?.message, erroReal);
         const estadoAnterior = avaliacoesConfirmadasRef.current[juvenilId] ?? criarAvaliacaoVazia(juvenilId, dataAlvo);
         setAvaliacoes((prev) => { const novo = { ...prev, [juvenilId]: estadoAnterior }; avaliacoesRef.current = novo; return novo; });
-        sincronizarLinhaEmTodasAvaliacoes(estadoAnterior);
         const nomeJuvenil = juvenis.find((j) => j.id === juvenilId)?.nome ?? "juvenil";
         exibirErro(`Falha ao salvar alteração de ${nomeJuvenil}. Os dados foram revertidos.`);
         return;
@@ -832,7 +1038,6 @@ export default function Home() {
     const ids = juvenisAtivos.map((j) => j.id);
     if (ids.length === 0) return;
     const snapshotAvaliacoes = { ...avaliacoesRef.current };
-    const snapshotTodasAvaliacoes = [...todasAvaliacoes];
     const novoMapa: Record<number, AvaliacaoRow> = { ...avaliacoesRef.current };
     juvenisAtivos.forEach((j) => {
       const anterior = avaliacoesRef.current[j.id] ?? criarAvaliacaoVazia(j.id, dataSelecionada);
@@ -844,13 +1049,11 @@ export default function Home() {
     });
     avaliacoesRef.current = novoMapa;
     setAvaliacoes(novoMapa);
-    setTodasAvaliacoes((prev) => { const filtradas = prev.filter((a) => a.data_avaliacao !== dataSelecionada); return [...filtradas, ...Object.values(novoMapa)]; });
     const { error: erroUpsert } = await supabase.from("avaliacoes").upsert(juvenisAtivos.map((j) => ({ juvenil_id: j.id, data_avaliacao: dataSelecionada })), { onConflict: "data_avaliacao,juvenil_id", ignoreDuplicates: true });
     if (erroUpsert) {
       console.error("Erro no upsert em massa:", erroUpsert.message, erroUpsert);
       avaliacoesRef.current = snapshotAvaliacoes;
       setAvaliacoes(snapshotAvaliacoes);
-      setTodasAvaliacoes(snapshotTodasAvaliacoes);
       exibirErro("Não foi possível atualizar a presença de todos. Verifique sua conexão.");
       return;
     }
@@ -860,7 +1063,6 @@ export default function Home() {
       console.error("Erro ao atualizar todos:", erroUpdate.message, erroUpdate);
       avaliacoesRef.current = snapshotAvaliacoes;
       setAvaliacoes(snapshotAvaliacoes);
-      setTodasAvaliacoes(snapshotTodasAvaliacoes);
       exibirErro("Erro ao salvar presença em massa no banco. Alteração revertida.");
       return;
     }
@@ -870,7 +1072,6 @@ export default function Home() {
     avaliacoesRef.current = mapa;
     avaliacoesConfirmadasRef.current = { ...mapa };
     setAvaliacoes(mapa);
-    setTodasAvaliacoes((prev) => { const filtradas = prev.filter((a) => a.data_avaliacao !== dataSelecionada); return [...filtradas, ...(data ?? [])]; });
   };
 
   const calcularTotal = useCallback((juvenilId: number): number => {
@@ -887,29 +1088,6 @@ export default function Home() {
   const aniversariantesSemana = useMemo(() => juvenisAtivos.filter((j) => aniversarioNaSemana(j.aniversario_dia, j.aniversario_mes)), [juvenisAtivos]);
   const aniversariantesHoje = useMemo(() => juvenisAtivos.filter((j) => ehAniversarioHoje(j.aniversario_dia, j.aniversario_mes)), [juvenisAtivos]);
   const aniversariantesMes = useMemo(() => juvenisAtivos.filter((j) => ehAniversarioNoMes(j.aniversario_dia, j.aniversario_mes)), [juvenisAtivos]);
-
-  const liderTrimestre = useMemo(() => {
-    const tri = trimestreAtual();
-    const meses = TRIMESTRES[tri].meses;
-    const ano = new Date().getFullYear();
-    const somas: Record<number, number> = {};
-    juvenisAtivos.forEach((j) => (somas[j.id] = 0));
-    todasAvaliacoes.forEach((a) => {
-      const [anoStr, mesStr] = a.data_avaliacao.split("-");
-      if (Number(anoStr) !== ano) return;
-      if (!meses.includes(Number(mesStr))) return;
-      if (!(a.juvenil_id in somas)) return;
-      CRITERIOS.forEach((c) => { if (a[c]) somas[a.juvenil_id] += SISTEMA_PONTOS[c]; });
-    });
-    const candidatos = juvenisAtivos.map((j) => ({ nome: j.nome, total: somas[j.id] ?? 0 }));
-    const lider = candidatos.reduce<{ nome: string; total: number } | null>((melhor, atual) => (!melhor || atual.total > melhor.total ? atual : melhor), null);
-    return lider && lider.total > 0 ? lider : null;
-  }, [juvenisAtivos, todasAvaliacoes]);
-
-  const historicoJuvenil = useMemo(() => {
-    if (!juvenilAberto) return [];
-    return todasAvaliacoes.filter((a) => a.juvenil_id === juvenilAberto.id).sort((a, b) => a.data_avaliacao.localeCompare(b.data_avaliacao));
-  }, [todasAvaliacoes, juvenilAberto]);
 
   const statsJuvenil = useMemo(() => {
     if (!juvenilAberto || historicoJuvenil.length === 0) return null;
@@ -930,7 +1108,14 @@ export default function Home() {
   if (carregandoAuth) return <SkeletonScreen />;
   if (!userId) return <LoginScreen />;
   if (!profile) return <SkeletonScreen />;
-  if (profile.must_change_password) return <TrocarSenhaScreen profile={profile} />;
+  if (profile.must_change_password) {
+    return (
+      <TrocarSenhaScreen
+        profile={profile}
+        onSenhaAlterada={() => setProfile({ ...profile, must_change_password: false })}
+      />
+    );
+  }
   if (carregando && juvenis.length === 0) return <SkeletonScreen />;
 
   return (
@@ -1090,7 +1275,7 @@ export default function Home() {
                     <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-black text-white shadow-lg ${total === PONTUACAO_MAXIMA ? "bg-gradient-to-br from-emerald-500 to-emerald-600 shadow-emerald-500/30" : total >= 60 ? "bg-gradient-to-br from-amber-500 to-amber-600 shadow-amber-500/30" : "bg-gradient-to-br from-purple-500 to-fuchsia-500 shadow-purple-500/30"}`}>
                       {initials}
                     </div>
-                    <button onClick={() => setJuvenilAberto(j)} className="text-left text-sm font-bold text-slate-100 transition hover:text-purple-300">
+                    <button onClick={() => abrirDetalhesJuvenil(j)} className="text-left text-sm font-bold text-slate-100 transition hover:text-purple-300">
                       {j.nome}
                     </button>
                   </div>
@@ -1139,7 +1324,7 @@ export default function Home() {
                     <tr key={j.id} className="border-b border-white/5 transition hover:bg-purple-500/5">
                       <td className="px-4 py-3 text-xs text-slate-500">{j.id}</td>
                       <td className="px-4 py-3">
-                        <button onClick={() => setJuvenilAberto(j)} className="text-left text-sm font-semibold text-slate-100 transition hover:text-purple-300" title="Ver histórico">
+                        <button onClick={() => abrirDetalhesJuvenil(j)} className="text-left text-sm font-semibold text-slate-100 transition hover:text-purple-300" title="Ver histórico">
                           {j.nome}
                         </button>
                       </td>
@@ -1189,6 +1374,9 @@ export default function Home() {
             </ol>
           </section>
         )}
+
+        {/* Seção de Visitantes do Sábado */}
+        <SecaoVisitantes dataSelecionada={dataSelecionada} formatarDataBR={formatarDataBR} />
       </div>
 
       {/* Modal Histórico */}
@@ -1205,7 +1393,12 @@ export default function Home() {
               <button onClick={() => setJuvenilAberto(null)} className="rounded-lg p-1 text-slate-400 transition hover:bg-white/10 hover:text-slate-100" aria-label="Fechar">✕</button>
             </div>
             <div className="max-h-[75vh] overflow-y-auto p-5">
-              {historicoJuvenil.length === 0 ? (
+              {carregandoHistorico ? (
+                <div className="py-12 text-center space-y-2">
+                  <div className="mx-auto h-7 w-7 animate-spin rounded-full border-2 border-purple-400 border-t-transparent" />
+                  <p className="text-xs text-slate-400">Buscando histórico do ano...</p>
+                </div>
+              ) : historicoJuvenil.length === 0 ? (
                 <p className="text-center text-sm text-slate-500">Nenhuma avaliação registrada ainda.</p>
               ) : (
                 <>
