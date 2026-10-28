@@ -192,10 +192,14 @@ function ModalEsqueciSenha({ onFechar }: { onFechar: () => void }) {
 
     setCarregando(true);
     const emailFinal = resolverEmail(valor);
+    const redirectUrl =
+      typeof window !== "undefined" && window.location.origin.includes("sistema-juvenis.vercel.app")
+        ? `${window.location.origin}/redefinir-senha`
+        : "https://sistema-juvenis.vercel.app/redefinir-senha";
 
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(emailFinal, {
-        redirectTo: `${window.location.origin}/redefinir-senha`,
+        redirectTo: redirectUrl,
       });
 
       if (error) {
