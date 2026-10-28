@@ -268,19 +268,20 @@ function ModalEsqueciSenha({ onFechar }: { onFechar: () => void }) {
           <form onSubmit={handleEnviar} className="space-y-3.5">
             <div>
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-purple-300">
-                Seu Usuário ou E-mail
+                Seu E-mail Cadastrado
               </label>
               <input
-                type="text"
+                type="email"
                 value={identificador}
                 onChange={(e) => setIdentificador(e.target.value)}
-                placeholder="Ex: tobias ou tobias.feitosa@gmail.com"
+                placeholder="ex: seu.email@gmail.com"
+                autoComplete="email"
                 autoFocus
                 required
                 className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-purple-400 focus:bg-white/10 focus:ring-2 focus:ring-purple-500/30"
               />
               <p className="mt-1.5 text-[11px] text-slate-400">
-                Enviaremos um link de acesso imediato para o e-mail cadastrado.
+                Enviaremos um link de acesso imediato para o e-mail informado.
               </p>
             </div>
 
@@ -336,7 +337,7 @@ function LoginScreen() {
       password: senha,
     });
     if (error) {
-      setErro("Usuário ou senha incorretos.");
+      setErro("E-mail ou senha incorretos.");
       setCarregando(false);
       return;
     }
@@ -362,10 +363,10 @@ function LoginScreen() {
           </div>
           <form onSubmit={handleLogin} className="space-y-3">
             <div>
-              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-purple-300">Usuário</label>
+              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-purple-300">E-mail</label>
               <div className="relative">
-                <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-base">👤</span>
-                <input type="text" value={usuario} onChange={(e) => setUsuario(e.target.value)} placeholder="bianca, cleide ou tobias" autoComplete="username" required className="w-full rounded-xl border border-white/10 bg-white/5 py-3 pl-10 pr-3 text-sm text-slate-100 placeholder-slate-500 outline-none transition-all focus:border-purple-400 focus:bg-white/10 focus:ring-2 focus:ring-purple-500/30" />
+                <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-base">✉️</span>
+                <input type="text" value={usuario} onChange={(e) => setUsuario(e.target.value)} placeholder="seu.email@gmail.com" autoComplete="email" required className="w-full rounded-xl border border-white/10 bg-white/5 py-3 pl-10 pr-3 text-sm text-slate-100 placeholder-slate-500 outline-none transition-all focus:border-purple-400 focus:bg-white/10 focus:ring-2 focus:ring-purple-500/30" />
               </div>
             </div>
             <div>

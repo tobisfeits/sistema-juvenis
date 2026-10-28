@@ -1,15 +1,17 @@
 // lib/auth-helpers.ts
 
 /**
- * Mapeamento de nomes de usuários para seus e-mails reais.
- * Adicione novos líderes/usuários aqui conforme informarem seus e-mails.
+ * Mapeamento de usuários/apelidos para seus e-mails reais cadastrados.
+ * O login agora tem como regra oficial o uso do E-MAIL.
  */
 export const USUARIOS_EMAILS: Record<string, string> = {
   tobias: "tobias.feitosa@gmail.com",
+  bianca: "biviamorim@gmail.com",
+  cleide: "cleidemjsm@gmail.com",
 };
 
 /**
- * Resolve o identificador (usuário ou e-mail) para um e-mail válido.
+ * Resolve o identificador (e-mail ou usuário legado) para um e-mail válido.
  */
 export function resolverEmail(usuarioOuEmail: string): string {
   const limpo = usuarioOuEmail.trim().toLowerCase();
