@@ -34,8 +34,29 @@ export default function RedefinirSenhaPage() {
       }
     );
 
-    // Verifica sessão existente ou hash na URL
+    // Verifica sessão existente, código PKCE (?code=) ou hash na URL
     async function checarSessao() {
+      // 1. Se veio código de recuperação na query string (?code=...)
+      if (typeof window !== "undefined") {
+        const urlParams = new URLSearchParams(window.location.search);
+        const code = urlParams.get("code");
+        if (code) {
+          try {
+            const { data: exchangeData, error: exchangeError } =
+              await supabase.auth.exchangeCodeForSession(code);
+            if (!exchangeError && exchangeData.session) {
+              if (!ativo) return;
+              setSession(exchangeData.session);
+              setStatus("pronto");
+              return;
+            }
+          } catch (e) {
+            console.warn("Tentando obter sessão existente após code:", e);
+          }
+        }
+      }
+
+      // 2. Se já possui sessão ativa
       const { data } = await supabase.auth.getSession();
       if (!ativo) return;
 

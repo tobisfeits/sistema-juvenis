@@ -838,6 +838,16 @@ export default function Home() {
   useEffect(() => { avaliacoesRef.current = avaliacoes; }, [avaliacoes]);
   useEffect(() => { mostrarAvisoInatividadeRef.current = mostrarAvisoInatividade; }, [mostrarAvisoInatividade]);
 
+  // Se o Supabase redirecionar para a raiz com código de recuperação (?code=...), encaminha para a tela de redefinição
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("code")) {
+        window.location.href = `/redefinir-senha?${params.toString()}`;
+      }
+    }
+  }, []);
+
   useEffect(() => {
     let ativo = true;
     async function verificar() {
