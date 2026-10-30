@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -12,9 +12,23 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+export const viewport: Viewport = {
+  themeColor: "#7c3aed",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+};
+
 export const metadata: Metadata = {
-  title: "Sistema Juvenis",
-  description: "Avaliação de juvenis",
+  title: "Sistema Juvenis - Soul em Cristo",
+  description: "Sistema de avaliação e chamada da classe de juvenis",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Juvenis",
+  },
 };
 
 export default function RootLayout({
@@ -25,6 +39,7 @@ export default function RootLayout({
   return (
     <html lang="pt-BR" suppressHydrationWarning>
       <head>
+        <link rel="apple-touch-icon" href="/soul-em-cristo.png" />
         <script
           dangerouslySetInnerHTML={{
             __html: `
