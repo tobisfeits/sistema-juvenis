@@ -60,3 +60,4 @@ export type Medalha = {
   nome: string;
   descricao: string;
 };
+

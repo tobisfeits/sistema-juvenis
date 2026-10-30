@@ -9,6 +9,8 @@ import { SecaoVisitantes } from "@/components/SecaoVisitantes";
 import { LinhaJuvenilDesktop } from "@/components/LinhaJuvenilDesktop";
 import { CardJuvenilMobile } from "@/components/CardJuvenilMobile";
 import { ModalRelatorioSecretaria } from "@/components/ModalRelatorioSecretaria";
+import { SeletorSabados } from "@/components/SeletorSabados";
+import { obterSabadoPadrao, formatarSabadoExtenso, ehSabado } from "@/lib/date-helpers";
 import type { Juvenil, AvaliacaoRow, Criterio, Profile, Medalha } from "@/types";
 import { CRITERIOS, LABEL, SISTEMA_PONTOS, PONTUACAO_MAXIMA } from "@/types";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
@@ -741,7 +743,7 @@ export default function Home() {
   const [juvenis, setJuvenis] = useState<Juvenil[]>([]);
   const [avaliacoes, setAvaliacoes] = useState<Record<number, AvaliacaoRow>>({});
   const [carregando, setCarregando] = useState(true);
-  const [dataSelecionada, setDataSelecionada] = useState<string>(hojeISO());
+  const [dataSelecionada, setDataSelecionada] = useState<string>(() => obterSabadoPadrao());
   const [juvenilAberto, setJuvenilAberto] = useState<Juvenil | null>(null);
   const [historicoJuvenil, setHistoricoJuvenil] = useState<AvaliacaoRow[]>([]);
   const [carregandoHistorico, setCarregandoHistorico] = useState(false);
@@ -1190,10 +1192,10 @@ export default function Home() {
 
           {/* Barra de ações */}
           <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-white/5 p-2 backdrop-blur">
-            <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2 text-xs">
-              <span className="text-slate-400">📅</span>
-              <input type="date" value={dataSelecionada} onChange={(e) => setDataSelecionada(e.target.value)} className="bg-transparent font-semibold text-slate-200 outline-none" />
-            </label>
+            <SeletorSabados
+              dataSelecionada={dataSelecionada}
+              onSelecionarData={(nova) => setDataSelecionada(nova)}
+            />
             <button onClick={() => setModalNovoAberto(true)} className="rounded-xl bg-gradient-to-r from-purple-600 to-fuchsia-600 px-3.5 py-2 text-xs font-bold text-white shadow-lg shadow-purple-500/20 transition hover:shadow-xl hover:shadow-fuchsia-500/30">
               ➕ Novo Juvenil
             </button>
@@ -1272,11 +1274,19 @@ export default function Home() {
 
         {/* Barra de presença em massa */}
         <div className="mb-4 flex flex-col gap-2 rounded-2xl border border-purple-500/20 bg-gradient-to-r from-purple-500/10 to-fuchsia-500/5 px-4 py-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">📋</span>
-            <p className="text-sm font-semibold text-slate-200">
-              Avaliando o sábado de <span className="text-purple-300">{formatarDataBR(dataSelecionada)}</span>
-            </p>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">📋</span>
+              <p className="text-sm font-semibold text-slate-200">
+                Avaliando: <span className="text-purple-300 font-bold">{formatarSabadoExtenso(dataSelecionada)}</span>
+              </p>
+            </div>
+            {dataSelecionada < obterSabadoPadrao() && (
+              <span className="inline-flex w-fit items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-[10px] font-bold text-amber-300">
+                <span>🕒</span>
+                <span>Lançamento Retroativo</span>
+              </span>
+            )}
           </div>
           <button onClick={alternarTodosPresentes} className={`rounded-xl px-3.5 py-1.5 text-xs font-bold text-white shadow-lg transition ${todosPresentes ? "bg-gradient-to-r from-red-600 to-red-500 shadow-red-500/20 hover:shadow-red-500/40" : "bg-gradient-to-r from-purple-600 to-fuchsia-600 shadow-purple-500/20 hover:shadow-fuchsia-500/40"}`}>
             {todosPresentes ? "❌ Desmarcar todos" : "✅ Marcar todos presentes"}

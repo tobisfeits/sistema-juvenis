@@ -95,3 +95,4 @@ export const CardJuvenilMobile = React.memo(function CardJuvenilMobile({
     </div>
   );
 });
+
