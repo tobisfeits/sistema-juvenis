@@ -8,6 +8,7 @@ import { resolverEmail, validarSenhaAmigavel } from "@/lib/auth-helpers";
 import { SecaoVisitantes } from "@/components/SecaoVisitantes";
 import { LinhaJuvenilDesktop } from "@/components/LinhaJuvenilDesktop";
 import { CardJuvenilMobile } from "@/components/CardJuvenilMobile";
+import { ModalRelatorioSecretaria } from "@/components/ModalRelatorioSecretaria";
 import type { Juvenil, AvaliacaoRow, Criterio, Profile, Medalha } from "@/types";
 import { CRITERIOS, LABEL, SISTEMA_PONTOS, PONTUACAO_MAXIMA } from "@/types";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
@@ -747,6 +748,7 @@ export default function Home() {
   const [liderTrimestre, setLiderTrimestre] = useState<{ nome: string; total: number } | null>(null);
   const [modalNovoAberto, setModalNovoAberto] = useState(false);
   const [modalGerenciarAberto, setModalGerenciarAberto] = useState(false);
+  const [modalRelatorioAberto, setModalRelatorioAberto] = useState(false);
   const [statusSalvamento, setStatusSalvamento] = useState<"salvo" | "salvando" | "erro">("salvo");
   const pendenciasCountRef = useRef(0);
 
@@ -1190,6 +1192,9 @@ export default function Home() {
             <button onClick={() => setModalGerenciarAberto(true)} className="rounded-xl border border-white/10 bg-white/5 px-3.5 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/10">
               ⚙️ Gerenciar
             </button>
+            <button onClick={() => setModalRelatorioAberto(true)} className="rounded-xl border border-purple-500/30 bg-purple-500/10 px-3.5 py-2 text-xs font-semibold text-purple-200 transition hover:bg-purple-500/20">
+              📋 Secretaria
+            </button>
             <Link href="/ranking" prefetch className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20">
               🏆 Ranking
             </Link>
@@ -1469,6 +1474,7 @@ export default function Home() {
 
       {modalNovoAberto && (<ModalNovoJuvenil onFechar={() => setModalNovoAberto(false)} onSalvo={() => { setModalNovoAberto(false); carregarJuvenis(); }} />)}
       {modalGerenciarAberto && (<ModalGerenciarJuvenis juvenis={juvenis} onFechar={() => setModalGerenciarAberto(false)} onAtualizado={() => carregarJuvenis()} />)}
+      {modalRelatorioAberto && (<ModalRelatorioSecretaria juvenis={juvenis} onFechar={() => setModalRelatorioAberto(false)} />)}
       {mostrarAvisoInatividade && (
         <ModalAvisoInatividade segundos={segundosRestantes} onContinuar={() => { ultimaAtividade.current = Date.now(); mostrarAvisoInatividadeRef.current = false; setMostrarAvisoInatividade(false); setSegundosRestantes(Math.floor(TEMPO_AVISO_MS / 1000)); }} />
       )}
