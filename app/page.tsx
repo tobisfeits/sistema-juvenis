@@ -984,9 +984,12 @@ export default function Home() {
         if (pendenciasCountRef.current === 0) setStatusSalvamento("salvo");
         return;
       }
-      const updateParcial: Record<string, boolean> = {};
+      const updateParcial: Record<string, any> = {};
       camposParaSalvar.forEach((c) => { updateParcial[c] = rowFinal[c]; });
-      const { error: erroUpsert } = await supabase.from("avaliacoes").upsert({ juvenil_id: juvenilId, data_avaliacao: dataAlvo }, { onConflict: "data_avaliacao,juvenil_id", ignoreDuplicates: true });
+      if (userId) {
+        updateParcial["atualizado_por"] = userId;
+      }
+      const { error: erroUpsert } = await supabase.from("avaliacoes").upsert({ juvenil_id: juvenilId, data_avaliacao: dataAlvo, atualizado_por: userId }, { onConflict: "data_avaliacao,juvenil_id", ignoreDuplicates: true });
       const { error: erroUpdate } = erroUpsert ? { error: erroUpsert } : await supabase.from("avaliacoes").update(updateParcial).eq("juvenil_id", juvenilId).eq("data_avaliacao", dataAlvo);
       
       pendenciasCountRef.current = Math.max(0, pendenciasCountRef.current - 1);
@@ -1040,7 +1043,12 @@ export default function Home() {
       exibirErro("Não foi possível atualizar a presença de todos. Verifique sua conexão.");
       return;
     }
-    const payloadUpdate = todosPresentes ? { presenca: false, pontualidade: false, participacao: false, estudo_licao: false, verso_aureo: false, biblia: false } : { presenca: true };
+    const payloadUpdate: Record<string, any> = todosPresentes
+      ? { presenca: false, pontualidade: false, participacao: false, estudo_licao: false, verso_aureo: false, biblia: false }
+      : { presenca: true };
+    if (userId) {
+      payloadUpdate["atualizado_por"] = userId;
+    }
     const { error: erroUpdate } = await supabase.from("avaliacoes").update(payloadUpdate).eq("data_avaliacao", dataSelecionada).in("juvenil_id", ids);
     if (erroUpdate) {
       console.error("Erro ao atualizar todos:", erroUpdate.message, erroUpdate);

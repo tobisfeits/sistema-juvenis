@@ -1,0 +1,18 @@
+{
+  "name": "Sistema Juvenis - Soul em Cristo",
+  "short_name": "Juvenis",
+  "description": "Sistema de Avaliação e Chamada da Classe de Juvenis",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#7c3aed",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/soul-em-cristo.png",
+      "sizes": "192x192 512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
