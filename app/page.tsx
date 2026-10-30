@@ -799,6 +799,8 @@ export default function Home() {
   const [liderTrimestre, setLiderTrimestre] = useState<{ nome: string; total: number } | null>(null);
   const [modalNovoAberto, setModalNovoAberto] = useState(false);
   const [modalGerenciarAberto, setModalGerenciarAberto] = useState(false);
+  const [statusSalvamento, setStatusSalvamento] = useState<"salvo" | "salvando" | "erro">("salvo");
+  const pendenciasCountRef = useRef(0);
 
   const [erroToast, setErroToast] = useState<string | null>(null);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1018,20 +1020,31 @@ export default function Home() {
     camposMudados.forEach((c) => camposPendentes.current[juvenilId].add(c));
     if (timeouts.current[juvenilId]) clearTimeout(timeouts.current[juvenilId]);
 
+    pendenciasCountRef.current += 1;
+    setStatusSalvamento("salvando");
+
     const dataAlvo = dataSelecionada;
     timeouts.current[juvenilId] = setTimeout(async () => {
       const camposParaSalvar = camposPendentes.current[juvenilId];
       const rowFinal = avaliacoesRef.current[juvenilId];
       delete camposPendentes.current[juvenilId];
       delete timeouts.current[juvenilId];
-      if (!camposParaSalvar || !rowFinal) return;
+      if (!camposParaSalvar || !rowFinal) {
+        pendenciasCountRef.current = Math.max(0, pendenciasCountRef.current - 1);
+        if (pendenciasCountRef.current === 0) setStatusSalvamento("salvo");
+        return;
+      }
       const updateParcial: Record<string, boolean> = {};
       camposParaSalvar.forEach((c) => { updateParcial[c] = rowFinal[c]; });
       const { error: erroUpsert } = await supabase.from("avaliacoes").upsert({ juvenil_id: juvenilId, data_avaliacao: dataAlvo }, { onConflict: "data_avaliacao,juvenil_id", ignoreDuplicates: true });
       const { error: erroUpdate } = erroUpsert ? { error: erroUpsert } : await supabase.from("avaliacoes").update(updateParcial).eq("juvenil_id", juvenilId).eq("data_avaliacao", dataAlvo);
+      
+      pendenciasCountRef.current = Math.max(0, pendenciasCountRef.current - 1);
+
       if (erroUpsert || erroUpdate) {
         const erroReal = erroUpsert || erroUpdate;
         console.error("Erro ao salvar avaliação:", erroReal?.message, erroReal);
+        setStatusSalvamento("erro");
         const estadoAnterior = avaliacoesConfirmadasRef.current[juvenilId] ?? criarAvaliacaoVazia(juvenilId, dataAlvo);
         setAvaliacoes((prev) => { const novo = { ...prev, [juvenilId]: estadoAnterior }; avaliacoesRef.current = novo; return novo; });
         const nomeJuvenil = juvenis.find((j) => j.id === juvenilId)?.nome ?? "juvenil";
@@ -1039,6 +1052,9 @@ export default function Home() {
         return;
       }
       avaliacoesConfirmadasRef.current[juvenilId] = { ...rowFinal };
+      if (pendenciasCountRef.current === 0) {
+        setStatusSalvamento("salvo");
+      }
     }, 600);
   };
 
@@ -1064,9 +1080,11 @@ export default function Home() {
     });
     avaliacoesRef.current = novoMapa;
     setAvaliacoes(novoMapa);
+    setStatusSalvamento("salvando");
     const { error: erroUpsert } = await supabase.from("avaliacoes").upsert(juvenisAtivos.map((j) => ({ juvenil_id: j.id, data_avaliacao: dataSelecionada })), { onConflict: "data_avaliacao,juvenil_id", ignoreDuplicates: true });
     if (erroUpsert) {
       console.error("Erro no upsert em massa:", erroUpsert.message, erroUpsert);
+      setStatusSalvamento("erro");
       avaliacoesRef.current = snapshotAvaliacoes;
       setAvaliacoes(snapshotAvaliacoes);
       exibirErro("Não foi possível atualizar a presença de todos. Verifique sua conexão.");
@@ -1076,11 +1094,13 @@ export default function Home() {
     const { error: erroUpdate } = await supabase.from("avaliacoes").update(payloadUpdate).eq("data_avaliacao", dataSelecionada).in("juvenil_id", ids);
     if (erroUpdate) {
       console.error("Erro ao atualizar todos:", erroUpdate.message, erroUpdate);
+      setStatusSalvamento("erro");
       avaliacoesRef.current = snapshotAvaliacoes;
       setAvaliacoes(snapshotAvaliacoes);
       exibirErro("Erro ao salvar presença em massa no banco. Alteração revertida.");
       return;
     }
+    setStatusSalvamento("salvo");
     const { data } = await supabase.from("avaliacoes").select("*").eq("data_avaliacao", dataSelecionada);
     const mapa: Record<number, AvaliacaoRow> = {};
     (data ?? []).forEach((row: AvaliacaoRow) => { mapa[row.juvenil_id] = row; });
@@ -1164,6 +1184,42 @@ export default function Home() {
               </p>
             </div>
             <div className="flex items-center gap-2">
+              {/* Badge de status do salvamento em tempo real */}
+              <div
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold backdrop-blur transition-all duration-300 ${
+                  statusSalvamento === "salvando"
+                    ? "border border-amber-500/30 bg-amber-500/10 text-amber-300 animate-pulse"
+                    : statusSalvamento === "erro"
+                    ? "border border-red-500/30 bg-red-500/10 text-red-300"
+                    : "border border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                }`}
+                title={
+                  statusSalvamento === "salvando"
+                    ? "Gravando notas no banco de dados..."
+                    : statusSalvamento === "erro"
+                    ? "Houve uma falha ao salvar as alterações."
+                    : "Todas as alterações estão seguras e salvas."
+                }
+              >
+                {statusSalvamento === "salvando" ? (
+                  <>
+                    <span className="h-2 w-2 rounded-full bg-amber-400 animate-ping" />
+                    <span>Salvando...</span>
+                  </>
+                ) : statusSalvamento === "erro" ? (
+                  <>
+                    <span className="h-2 w-2 rounded-full bg-red-400" />
+                    <span>Falha ao salvar</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                    <span className="hidden sm:inline">Salvo no banco</span>
+                    <span className="sm:hidden">Salvo</span>
+                  </>
+                )}
+              </div>
+
               <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 backdrop-blur">
                 <span className="text-sm">👤</span>
                 <span>{profile.nome}</span>
