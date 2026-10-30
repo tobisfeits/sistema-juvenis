@@ -6,64 +6,14 @@ import Image from "next/image";
 import { createClient } from "@/lib/supabase";
 import { resolverEmail, validarSenhaAmigavel } from "@/lib/auth-helpers";
 import { SecaoVisitantes } from "@/components/SecaoVisitantes";
+import { LinhaJuvenilDesktop } from "@/components/LinhaJuvenilDesktop";
+import { CardJuvenilMobile } from "@/components/CardJuvenilMobile";
+import type { Juvenil, AvaliacaoRow, Criterio, Profile, Medalha } from "@/types";
+import { CRITERIOS, LABEL, SISTEMA_PONTOS, PONTUACAO_MAXIMA } from "@/types";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 
 const TEMPO_INATIVIDADE_MS = 30 * 60 * 1000; // 30 minutos (evita logout precoce durante a aula)
 const TEMPO_AVISO_MS = 2 * 60 * 1000; // 2 minutos de aviso prévio
-
-type Juvenil = {
-  id: number;
-  nome: string;
-  aniversario_dia: number | null;
-  aniversario_mes: number | null;
-  ativo: boolean | null;
-};
-
-const SISTEMA_PONTOS = {
-  presenca: 20,
-  pontualidade: 10,
-  participacao: 10,
-  estudo_licao: 25,
-  verso_aureo: 20,
-  biblia: 15,
-} as const;
-
-type Criterio = keyof typeof SISTEMA_PONTOS;
-const CRITERIOS = Object.keys(SISTEMA_PONTOS) as Criterio[];
-
-const PONTUACAO_MAXIMA = CRITERIOS.reduce(
-  (soma, c) => soma + SISTEMA_PONTOS[c],
-  0
-);
-
-const LABEL: Record<Criterio, string> = {
-  presenca: "Presença",
-  pontualidade: "Pontualidade",
-  participacao: "Participação",
-  estudo_licao: "Estudo da Lição",
-  verso_aureo: "Verso Áureo",
-  biblia: "Bíblia",
-};
-
-type AvaliacaoRow = {
-  id?: number;
-  juvenil_id: number;
-  data_avaliacao: string;
-  presenca: boolean;
-  pontualidade: boolean;
-  participacao: boolean;
-  estudo_licao: boolean;
-  verso_aureo: boolean;
-  biblia: boolean;
-};
-
-type Profile = {
-  id: string;
-  nome: string;
-  email: string;
-  username: string | null;
-  must_change_password: boolean;
-};
 
 function hojeISO(): string {
   const d = new Date();
@@ -140,8 +90,6 @@ function calcularTotalLinha(row: AvaliacaoRow): number {
     return soma + (row[c] ? SISTEMA_PONTOS[c] : 0);
   }, 0);
 }
-
-type Medalha = { emoji: string; nome: string; descricao: string };
 
 function calcularMedalhas(avaliacoes: AvaliacaoRow[]): Medalha[] {
   const medalhas: Medalha[] = [];
@@ -1334,42 +1282,16 @@ export default function Home() {
 
         {/* Cards mobile */}
         <section className="space-y-3 sm:hidden">
-          {juvenisAtivos.map((j) => {
-            const row = avaliacoes[j.id];
-            const temPresenca = row?.presenca ?? false;
-            const total = calcularTotal(j.id);
-            const initials = j.nome.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase();
-            return (
-              <div key={j.id} className="overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-slate-900/80 to-slate-950/60 p-4 backdrop-blur">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-black text-white shadow-lg ${total === PONTUACAO_MAXIMA ? "bg-gradient-to-br from-emerald-500 to-emerald-600 shadow-emerald-500/30" : total >= 60 ? "bg-gradient-to-br from-amber-500 to-amber-600 shadow-amber-500/30" : "bg-gradient-to-br from-purple-500 to-fuchsia-500 shadow-purple-500/30"}`}>
-                      {initials}
-                    </div>
-                    <button onClick={() => abrirDetalhesJuvenil(j)} className="text-left text-sm font-bold text-slate-100 transition hover:text-purple-300">
-                      {j.nome}
-                    </button>
-                  </div>
-                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-black ${total === PONTUACAO_MAXIMA ? "bg-emerald-500/20 text-emerald-300" : total >= 60 ? "bg-amber-500/20 text-amber-300" : total > 0 ? "bg-purple-500/20 text-purple-200" : "bg-white/5 text-slate-500"}`}>
-                    {total}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  {CRITERIOS.map((c) => {
-                    const isPresenca = c === "presenca";
-                    const marcado = row?.[c] ?? false;
-                    const desabilitado = !isPresenca && !temPresenca;
-                    return (
-                      <label key={c} className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-xs transition ${marcado ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : desabilitado ? "cursor-not-allowed border-white/5 bg-white/[0.02] text-slate-600" : "border-white/10 bg-white/5 text-slate-300 hover:border-purple-500/30"}`}>
-                        <input type="checkbox" checked={marcado} disabled={desabilitado} onChange={() => alternarCriterio(j.id, c)} className="h-4 w-4 shrink-0 cursor-pointer rounded border-slate-600 text-purple-600 focus:ring-purple-500 disabled:cursor-not-allowed" />
-                        <span className="truncate font-medium">{LABEL[c]}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
+          {juvenisAtivos.map((j) => (
+            <CardJuvenilMobile
+              key={j.id}
+              juvenil={j}
+              row={avaliacoes[j.id]}
+              total={calcularTotal(j.id)}
+              onAlternarCriterio={alternarCriterio}
+              onAbrirDetalhes={abrirDetalhesJuvenil}
+            />
+          ))}
         </section>
 
         {/* Tabela desktop */}
@@ -1387,38 +1309,16 @@ export default function Home() {
                 </tr>
               </thead>
               <tbody>
-                {juvenisAtivos.map((j) => {
-                  const row = avaliacoes[j.id];
-                  const temPresenca = row?.presenca ?? false;
-                  const total = calcularTotal(j.id);
-                  return (
-                    <tr key={j.id} className="border-b border-white/5 transition hover:bg-purple-500/5">
-                      <td className="px-4 py-3 text-xs text-slate-500">{j.id}</td>
-                      <td className="px-4 py-3">
-                        <button onClick={() => abrirDetalhesJuvenil(j)} className="text-left text-sm font-semibold text-slate-100 transition hover:text-purple-300" title="Ver histórico">
-                          {j.nome}
-                        </button>
-                      </td>
-                      {CRITERIOS.map((c) => {
-                        const isPresenca = c === "presenca";
-                        const marcado = row?.[c] ?? false;
-                        const desabilitado = !isPresenca && !temPresenca;
-                        return (
-                          <td key={c} className="px-2 py-3 text-center">
-                            <label className={`inline-flex cursor-pointer items-center justify-center ${desabilitado ? "cursor-not-allowed opacity-30" : ""}`} title={desabilitado ? "Marque a presença primeiro" : LABEL[c]}>
-                              <input type="checkbox" checked={marcado} disabled={desabilitado} onChange={() => alternarCriterio(j.id, c)} className="h-5 w-5 cursor-pointer rounded border-slate-600 bg-white/5 text-purple-600 focus:ring-purple-500 disabled:cursor-not-allowed" aria-label={`${LABEL[c]} — ${j.nome}`} />
-                            </label>
-                          </td>
-                        );
-                      })}
-                      <td className="px-4 py-3 text-center">
-                        <span className={`inline-block min-w-[3rem] rounded-full px-2.5 py-1 text-xs font-black ${total === PONTUACAO_MAXIMA ? "bg-emerald-500/20 text-emerald-300" : total >= 60 ? "bg-amber-500/20 text-amber-300" : total > 0 ? "bg-purple-500/20 text-purple-200" : "bg-white/5 text-slate-500"}`}>
-                          {total}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {juvenisAtivos.map((j) => (
+                  <LinhaJuvenilDesktop
+                    key={j.id}
+                    juvenil={j}
+                    row={avaliacoes[j.id]}
+                    total={calcularTotal(j.id)}
+                    onAlternarCriterio={alternarCriterio}
+                    onAbrirDetalhes={abrirDetalhesJuvenil}
+                  />
+                ))}
               </tbody>
             </table>
           </div>
