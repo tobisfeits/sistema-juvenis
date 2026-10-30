@@ -108,3 +108,4 @@ export function formatarSabadoExtenso(iso: string): string {
   const ano = d.getFullYear();
   return `Sábado, ${dia} de ${mes} de ${ano}`;
 }
+

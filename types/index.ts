@@ -45,6 +45,7 @@ export type AvaliacaoRow = {
   verso_aureo: boolean;
   biblia: boolean;
   atualizado_por?: string | null;
+  updated_at?: string | null;
 };
 
 export type Profile = {

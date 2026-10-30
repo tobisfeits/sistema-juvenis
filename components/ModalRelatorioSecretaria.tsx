@@ -4,7 +4,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase";
 import type { Juvenil, AvaliacaoRow } from "@/types";
-import { SISTEMA_PONTOS, PONTUACAO_MAXIMA } from "@/types";
+import { SISTEMA_PONTOS } from "@/types";
 
 interface ModalRelatorioSecretariaProps {
   juvenis: Juvenil[];
@@ -23,6 +23,16 @@ type ResumoJuvenil = {
   frequenciaPct: number;
 };
 
+type ItemVisitaRelatorio = {
+  id: number;
+  data_visita: string;
+  nome: string;
+  quem_convidou: string | null;
+  contato: string | null;
+  trouxe_biblia: boolean;
+  trouxe_licao: boolean;
+};
+
 export function ModalRelatorioSecretaria({
   juvenis,
   onFechar,
@@ -35,7 +45,9 @@ export function ModalRelatorioSecretaria({
 
   const [mesSelecionado, setMesSelecionado] = useState(`${anoAtual}-${mesAtual}`);
   const [carregando, setCarregando] = useState(true);
+  const [abaAtiva, setAbaAtiva] = useState<"membros" | "visitantes">("membros");
   const [avaliacoesMes, setAvaliacoesMes] = useState<AvaliacaoRow[]>([]);
+  const [visitasMes, setVisitasMes] = useState<ItemVisitaRelatorio[]>([]);
   const [sabadosComRegistro, setSabadosComRegistro] = useState<string[]>([]);
 
   useEffect(() => {
@@ -46,25 +58,42 @@ export function ModalRelatorioSecretaria({
       const inicio = `${ano}-${mes}-01`;
       const fim = `${ano}-${mes}-${String(ultimoDia).padStart(2, "0")}`;
 
-      const { data, error } = await supabase
+      // 1. Busca chamadas dos membros
+      const { data: dataAvaliacoes } = await supabase
         .from("avaliacoes")
         .select("*")
         .gte("data_avaliacao", inicio)
         .lte("data_avaliacao", fim)
         .order("data_avaliacao", { ascending: true });
 
-      if (error) {
-        console.error("Erro ao buscar relatório da secretaria:", error);
-        setCarregando(false);
-        return;
-      }
-
-      const rows: AvaliacaoRow[] = data ?? [];
+      const rows: AvaliacaoRow[] = dataAvaliacoes ?? [];
       setAvaliacoesMes(rows);
 
-      // Descobre os sábados únicos que tiveram chamada lançada
       const sabados = Array.from(new Set(rows.map((r) => r.data_avaliacao))).sort();
       setSabadosComRegistro(sabados);
+
+      // 2. Busca visitantes registrados no mês
+      const { data: dataVisitas } = await supabase
+        .from("visitas_presencas")
+        .select("id, data_visita, trouxe_biblia, trouxe_licao, visitante:visitantes(nome, quem_convidou, contato)")
+        .gte("data_visita", inicio)
+        .lte("data_visita", fim)
+        .order("data_visita", { ascending: true });
+
+      const formatados: ItemVisitaRelatorio[] = (dataVisitas ?? []).map((v: any) => {
+        const infoVisitante = Array.isArray(v.visitante) ? v.visitante[0] : v.visitante;
+        return {
+          id: v.id,
+          data_visita: v.data_visita,
+          nome: infoVisitante?.nome ?? "Visitante",
+          quem_convidou: infoVisitante?.quem_convidou ?? null,
+          contato: infoVisitante?.contato ?? null,
+          trouxe_biblia: v.trouxe_biblia ?? false,
+          trouxe_licao: v.trouxe_licao ?? false,
+        };
+      });
+
+      setVisitasMes(formatados);
       setCarregando(false);
     }
 
@@ -114,43 +143,46 @@ export function ModalRelatorioSecretaria({
       .sort((a, b) => b.pontosTotais - a.pontosTotais);
   }, [juvenis, avaliacoesMes, sabadosComRegistro]);
 
-  // Totais gerais da classe para o boletim da secretaria
+  // Totais gerais para o boletim
   const metricasGerais = useMemo(() => {
     const totalAlunos = consolidado.length;
     const totalSabados = sabadosComRegistro.length;
     if (totalAlunos === 0 || totalSabados === 0) {
-      return { mediaPresencaSabado: 0, taxaLicao: 0, taxaBiblia: 0, totalPontosGeral: 0 };
+      return { mediaPresencaSabado: 0, taxaLicao: 0, taxaBiblia: 0, totalVisitantes: visitasMes.length };
     }
 
     const somaPresencas = consolidado.reduce((s, c) => s + c.presencas, 0);
     const somaLicoes = consolidado.reduce((s, c) => s + c.licoes, 0);
     const somaBiblias = consolidado.reduce((s, c) => s + c.biblias, 0);
-    const totalPontosGeral = consolidado.reduce((s, c) => s + c.pontosTotais, 0);
 
     const mediaPresencaSabado = (somaPresencas / totalSabados).toFixed(1);
     const totalOportunidadesPresenca = somaPresencas > 0 ? somaPresencas : 1;
     const taxaLicao = Math.round((somaLicoes / totalOportunidadesPresenca) * 100);
     const taxaBiblia = Math.round((somaBiblias / totalOportunidadesPresenca) * 100);
 
-    return { mediaPresencaSabado, taxaLicao, taxaBiblia, totalPontosGeral };
-  }, [consolidado, sabadosComRegistro]);
+    return { mediaPresencaSabado, taxaLicao, taxaBiblia, totalVisitantes: visitasMes.length };
+  }, [consolidado, sabadosComRegistro, visitasMes]);
 
   // Exportar para CSV (Excel)
   const exportarCSV = () => {
-    const cabecalho = "Nome;Presenças;Freq (%);Lição da Semana;Bíblia;Pontos Totais;Média/Sábado\n";
-    const linhas = consolidado
-      .map(
-        (c) =>
-          `"${c.nome}";${c.presencas}/${sabadosComRegistro.length};${c.frequenciaPct}%;${c.licoes};${c.biblias};${c.pontosTotais};${c.mediaPorSabado}`
-      )
-      .join("\n");
+    let cabecalho = "Nome;Tipo;Presenças / Data;Freq (%);Lição;Bíblia;Pontos Totais;Convidado Por;Contato\n";
+    
+    const linhasMembros = consolidado.map(
+      (c) =>
+        `"${c.nome}";Membro;${c.presencas}/${sabadosComRegistro.length};${c.frequenciaPct}%;${c.licoes};${c.biblias};${c.pontosTotais};-; -`
+    );
 
-    const conteudo = "\uFEFF" + cabecalho + linhas; // \uFEFF para UTF-8 no Excel
+    const linhasVisitantes = visitasMes.map(
+      (v) =>
+        `"${v.nome}";Visitante;${v.data_visita.split("-").reverse().join("/")};-;${v.trouxe_licao ? "Sim" : "Não"};${v.trouxe_biblia ? "Sim" : "Não"};-;"${v.quem_convidou ?? "-"}";"${v.contato ?? "-"}"`
+    );
+
+    const conteudo = "\uFEFF" + cabecalho + [...linhasMembros, ...linhasVisitantes].join("\n");
     const blob = new Blob([conteudo], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `relatorio-secretaria-juvenis-${mesSelecionado}.csv`);
+    link.setAttribute("download", `relatorio-completo-secretaria-${mesSelecionado}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -175,7 +207,7 @@ export function ModalRelatorioSecretaria({
               </h2>
             </div>
             <p className="mt-1 text-xs text-slate-400">
-              Dados consolidados de frequência, estudo da lição e bíblia para entrega de boletim.
+              Dados consolidados de frequência, estudo da lição, bíblia e visitantes para o boletim.
             </p>
           </div>
 
@@ -190,10 +222,10 @@ export function ModalRelatorioSecretaria({
               onClick={exportarCSV}
               disabled={carregando || consolidado.length === 0}
               className="flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2 text-xs font-bold text-emerald-300 transition hover:bg-emerald-500/20 disabled:opacity-40"
-              title="Baixar planilha compatível com Excel"
+              title="Baixar planilha completa (membros + visitantes) compatível com Excel"
             >
               <span>📥</span>
-              <span>Baixar Excel (CSV)</span>
+              <span>Baixar Excel</span>
             </button>
             <button
               onClick={onFechar}
@@ -205,26 +237,26 @@ export function ModalRelatorioSecretaria({
           </div>
         </div>
 
-        {/* Métricas Resumidas para o Boletim */}
+        {/* 4 Cards de Resumo para o Boletim */}
         <div className="my-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div className="rounded-2xl border border-purple-500/20 bg-purple-500/5 p-3.5">
             <p className="text-[10px] font-bold uppercase tracking-wider text-purple-300">
-              Sábados Realizados
+              Sábados com Chamada
             </p>
             <p className="mt-1 text-2xl font-black text-white">
               {sabadosComRegistro.length}
             </p>
-            <p className="text-[10px] text-slate-400">chamadas registradas</p>
+            <p className="text-[10px] text-slate-400">sábados avaliados</p>
           </div>
 
           <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-3.5">
             <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">
-              Média de Presença
+              Média Alunos/Sábado
             </p>
             <p className="mt-1 text-2xl font-black text-white">
               {metricasGerais.mediaPresencaSabado}
             </p>
-            <p className="text-[10px] text-slate-400">alunos / sábado</p>
+            <p className="text-[10px] text-slate-400">alunos assíduos</p>
           </div>
 
           <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-3.5">
@@ -234,87 +266,151 @@ export function ModalRelatorioSecretaria({
             <p className="mt-1 text-2xl font-black text-white">
               {metricasGerais.taxaLicao}%
             </p>
-            <p className="text-[10px] text-slate-400">dos presentes estudaram</p>
+            <p className="text-[10px] text-slate-400">dos alunos presentes</p>
           </div>
 
-          <div className="rounded-2xl border border-fuchsia-500/20 bg-fuchsia-500/5 p-3.5">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-fuchsia-300">
-              Taxa com Bíblia
+          <div className="rounded-2xl border border-pink-500/20 bg-pink-500/5 p-3.5">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-pink-300">
+              Visitantes Recebidos
             </p>
             <p className="mt-1 text-2xl font-black text-white">
-              {metricasGerais.taxaBiblia}%
+              {visitasMes.length}
             </p>
-            <p className="text-[10px] text-slate-400">dos presentes trouxeram</p>
+            <p className="text-[10px] text-slate-400">no mês selecionado</p>
           </div>
         </div>
 
-        {/* Tabela Detalhada por Juvenil */}
+        {/* Abas: Membros vs Visitantes */}
+        <div className="mb-3 flex gap-2 border-b border-white/10 pb-2">
+          <button
+            onClick={() => setAbaAtiva("membros")}
+            className={`rounded-xl px-3.5 py-1.5 text-xs font-bold transition ${
+              abaAtiva === "membros"
+                ? "bg-purple-600 text-white shadow-md shadow-purple-500/20"
+                : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+            }`}
+          >
+            👥 Membros da Classe ({consolidado.length})
+          </button>
+          <button
+            onClick={() => setAbaAtiva("visitantes")}
+            className={`rounded-xl px-3.5 py-1.5 text-xs font-bold transition ${
+              abaAtiva === "visitantes"
+                ? "bg-fuchsia-600 text-white shadow-md shadow-fuchsia-500/20"
+                : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+            }`}
+          >
+            🌟 Visitantes do Mês ({visitasMes.length})
+          </button>
+        </div>
+
+        {/* Conteúdo da Tabela */}
         <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/60">
           {carregando ? (
             <div className="py-12 text-center text-sm text-slate-400 animate-pulse">
-              Carregando dados da secretaria...
+              Carregando dados consolidados...
             </div>
-          ) : consolidado.length === 0 ? (
-            <div className="py-12 text-center text-sm text-slate-500">
-              Nenhuma avaliação encontrada para o mês selecionado.
-            </div>
-          ) : (
-            <div className="max-h-[50vh] overflow-x-auto overflow-y-auto">
-              <table className="w-full border-collapse text-left text-xs">
-                <thead>
-                  <tr className="sticky top-0 z-10 border-b border-white/10 bg-slate-900 text-purple-300">
-                    <th className="px-4 py-3 font-bold">Juvenil</th>
-                    <th className="px-3 py-3 text-center font-bold">Presenças</th>
-                    <th className="px-3 py-3 text-center font-bold">Assiduidade</th>
-                    <th className="px-3 py-3 text-center font-bold">Lição</th>
-                    <th className="px-3 py-3 text-center font-bold">Bíblia</th>
-                    <th className="px-3 py-3 text-center font-bold">Pontos Totais</th>
-                    <th className="px-3 py-3 text-center font-bold">Média/Sábado</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {consolidado.map((c) => (
-                    <tr key={c.id} className="transition hover:bg-white/[0.02]">
-                      <td className="px-4 py-3 font-semibold text-slate-100">{c.nome}</td>
-                      <td className="px-3 py-3 text-center font-mono text-slate-300">
-                        {c.presencas}/{sabadosComRegistro.length}
-                      </td>
-                      <td className="px-3 py-3 text-center">
-                        <span
-                          className={`inline-block rounded-full px-2 py-0.5 font-bold ${
-                            c.frequenciaPct >= 75
-                              ? "bg-emerald-500/20 text-emerald-300"
-                              : c.frequenciaPct >= 50
-                              ? "bg-amber-500/20 text-amber-300"
-                              : "bg-red-500/20 text-red-300"
-                          }`}
-                        >
-                          {c.frequenciaPct}%
-                        </span>
-                      </td>
-                      <td className="px-3 py-3 text-center font-semibold text-purple-300">
-                        {c.licoes}x
-                      </td>
-                      <td className="px-3 py-3 text-center font-semibold text-blue-300">
-                        {c.biblias}x
-                      </td>
-                      <td className="px-3 py-3 text-center font-black text-amber-300">
-                        {c.pontosTotais}
-                      </td>
-                      <td className="px-3 py-3 text-center font-bold text-slate-300">
-                        {c.mediaPorSabado} pts
-                      </td>
+          ) : abaAtiva === "membros" ? (
+            consolidado.length === 0 ? (
+              <div className="py-12 text-center text-sm text-slate-500">
+                Nenhuma avaliação encontrada para o mês selecionado.
+              </div>
+            ) : (
+              <div className="max-h-[45vh] overflow-x-auto overflow-y-auto">
+                <table className="w-full border-collapse text-left text-xs">
+                  <thead>
+                    <tr className="sticky top-0 z-10 border-b border-white/10 bg-slate-900 text-purple-300">
+                      <th className="px-4 py-3 font-bold">Juvenil</th>
+                      <th className="px-3 py-3 text-center font-bold">Presenças</th>
+                      <th className="px-3 py-3 text-center font-bold">Assiduidade</th>
+                      <th className="px-3 py-3 text-center font-bold">Lição</th>
+                      <th className="px-3 py-3 text-center font-bold">Bíblia</th>
+                      <th className="px-3 py-3 text-center font-bold">Pontos Totais</th>
+                      <th className="px-3 py-3 text-center font-bold">Média/Sábado</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {consolidado.map((c) => (
+                      <tr key={c.id} className="transition hover:bg-white/[0.02]">
+                        <td className="px-4 py-3 font-semibold text-slate-100">{c.nome}</td>
+                        <td className="px-3 py-3 text-center font-mono text-slate-300">
+                          {c.presencas}/{sabadosComRegistro.length}
+                        </td>
+                        <td className="px-3 py-3 text-center">
+                          <span
+                            className={`inline-block rounded-full px-2 py-0.5 font-bold ${
+                              c.frequenciaPct >= 75
+                                ? "bg-emerald-500/20 text-emerald-300"
+                                : c.frequenciaPct >= 50
+                                ? "bg-amber-500/20 text-amber-300"
+                                : "bg-red-500/20 text-red-300"
+                            }`}
+                          >
+                            {c.frequenciaPct}%
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 text-center font-semibold text-purple-300">
+                          {c.licoes}x
+                        </td>
+                        <td className="px-3 py-3 text-center font-semibold text-blue-300">
+                          {c.biblias}x
+                        </td>
+                        <td className="px-3 py-3 text-center font-black text-amber-300">
+                          {c.pontosTotais}
+                        </td>
+                        <td className="px-3 py-3 text-center font-bold text-slate-300">
+                          {c.mediaPorSabado} pts
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          ) : (
+            /* Tabela de Visitantes */
+            visitasMes.length === 0 ? (
+              <div className="py-12 text-center text-sm text-slate-500">
+                Nenhum visitante registrado no mês selecionado.
+              </div>
+            ) : (
+              <div className="max-h-[45vh] overflow-x-auto overflow-y-auto">
+                <table className="w-full border-collapse text-left text-xs">
+                  <thead>
+                    <tr className="sticky top-0 z-10 border-b border-white/10 bg-slate-900 text-fuchsia-300">
+                      <th className="px-4 py-3 font-bold">Data</th>
+                      <th className="px-4 py-3 font-bold">Nome do Visitante</th>
+                      <th className="px-3 py-3 font-bold">Quem Convidou</th>
+                      <th className="px-3 py-3 font-bold">Contato</th>
+                      <th className="px-3 py-3 text-center font-bold">Trouxe Lição?</th>
+                      <th className="px-3 py-3 text-center font-bold">Trouxe Bíblia?</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {visitasMes.map((v) => (
+                      <tr key={v.id} className="transition hover:bg-white/[0.02]">
+                        <td className="px-4 py-3 font-mono text-purple-300">
+                          {v.data_visita.split("-").reverse().join("/")}
+                        </td>
+                        <td className="px-4 py-3 font-bold text-white">{v.nome}</td>
+                        <td className="px-3 py-3 text-slate-300">{v.quem_convidou ?? "—"}</td>
+                        <td className="px-3 py-3 font-mono text-slate-400">{v.contato ?? "—"}</td>
+                        <td className="px-3 py-3 text-center">{v.trouxe_licao ? "✅" : "—"}</td>
+                        <td className="px-3 py-3 text-center">{v.trouxe_biblia ? "✅" : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
           )}
         </div>
 
         {/* Rodapé informativo */}
         <div className="mt-4 flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-500 gap-2">
-          <p>Dica: O botão "Baixar Excel (CSV)" gera um arquivo perfeito para enviar por WhatsApp para a direção da igreja.</p>
+          <p>
+            O botão <strong>Baixar Excel</strong> consolida membros e visitantes em um só arquivo para o boletim da secretaria.
+          </p>
           <button
             onClick={onFechar}
             className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/10"
@@ -326,4 +422,3 @@ export function ModalRelatorioSecretaria({
     </div>
   );
 }
-

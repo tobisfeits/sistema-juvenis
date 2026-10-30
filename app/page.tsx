@@ -752,6 +752,8 @@ export default function Home() {
   const [modalGerenciarAberto, setModalGerenciarAberto] = useState(false);
   const [modalRelatorioAberto, setModalRelatorioAberto] = useState(false);
   const [statusSalvamento, setStatusSalvamento] = useState<"salvo" | "salvando" | "erro">("salvo");
+  const [ultimoAtualizador, setUltimoAtualizador] = useState<string | null>(null);
+  const [todosProfiles, setTodosProfiles] = useState<Record<string, string>>({});
   const pendenciasCountRef = useRef(0);
 
   const [erroToast, setErroToast] = useState<string | null>(null);
@@ -829,6 +831,17 @@ export default function Home() {
       if (error || !data) { console.error("Erro ao carregar perfil:", error); setCarregandoAuth(false); return; }
       await supabase.from("profiles").update({ ultimo_login: new Date().toISOString() }).eq("id", userId);
       setProfile(data as Profile);
+
+      // Carrega mapa de todos os professores para exibir seus nomes na auditoria
+      const { data: listaProfessores } = await supabase.from("profiles").select("id, nome");
+      if (listaProfessores) {
+        const mapa: Record<string, string> = {};
+        (listaProfessores as { id: string; nome: string }[]).forEach((p) => {
+          mapa[p.id] = p.nome.split(" ")[0]; // Primeiro nome (ex: Bianca, Cleide, Tobias)
+        });
+        setTodosProfiles(mapa);
+      }
+
       setCarregandoAuth(false);
     }
     carregarProfile();
@@ -932,7 +945,14 @@ export default function Home() {
       const { data, error } = await supabase.from("avaliacoes").select("*").eq("data_avaliacao", dataSelecionada);
       if (error) { console.error("Erro ao buscar avaliações:", error.message, error); exibirErro("Erro ao carregar avaliações da data selecionada."); setCarregando(false); return; }
       const mapa: Record<number, AvaliacaoRow> = {};
-      (data ?? []).forEach((row: AvaliacaoRow) => { mapa[row.juvenil_id] = row; });
+      let quemUltimo: string | null = null;
+      (data ?? []).forEach((row: AvaliacaoRow) => {
+        mapa[row.juvenil_id] = row;
+        if (row.atualizado_por) {
+          quemUltimo = row.atualizado_por;
+        }
+      });
+      setUltimoAtualizador(quemUltimo);
       avaliacoesRef.current = { ...mapa };
       avaliacoesConfirmadasRef.current = { ...mapa };
       setAvaliacoes(mapa);
@@ -1007,6 +1027,9 @@ export default function Home() {
         return;
       }
       avaliacoesConfirmadasRef.current[juvenilId] = { ...rowFinal };
+      if (userId) {
+        setUltimoAtualizador(userId);
+      }
       if (pendenciasCountRef.current === 0) {
         setStatusSalvamento("salvo");
       }
@@ -1285,6 +1308,12 @@ export default function Home() {
               <span className="inline-flex w-fit items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-[10px] font-bold text-amber-300">
                 <span>🕒</span>
                 <span>Lançamento Retroativo</span>
+              </span>
+            )}
+            {ultimoAtualizador && (
+              <span className="inline-flex w-fit items-center gap-1 rounded-full border border-purple-500/30 bg-purple-500/10 px-2.5 py-0.5 text-[10px] font-semibold text-purple-200">
+                <span>✍️</span>
+                <span>Lançado por {todosProfiles[ultimoAtualizador] ?? "professor(a)"}</span>
               </span>
             )}
           </div>
